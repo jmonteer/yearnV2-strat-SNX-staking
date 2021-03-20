@@ -1,5 +1,6 @@
 import pytest
 from brownie import config, Contract
+from eth_abi import encode_single
 
 
 @pytest.fixture
@@ -88,6 +89,18 @@ def susd_whale(accounts):
 @pytest.fixture
 def snx_whale(accounts):
     yield accounts.at("0xA1d7b2d891e3A1f9ef4bBC5be20630C2FEB1c470", force=True)
+
+
+@pytest.fixture
+def snx_oracle(gov, accounts, SnxOracle):
+    exchange_rate = Contract("0xd69b189020EF614796578AfE4d10378c5e7e1138")
+    er_gov = accounts.at(exchange_rate.owner(), force=True)
+    new_oracle = gov.deploy(SnxOracle, "0xd69b189020EF614796578AfE4d10378c5e7e1138")
+    exchange_rate.setOracle(new_oracle, {"from": er_gov})
+
+    # If we don't remove the aggregator prices update through oracle are not considered
+    exchange_rate.removeAggregator(encode_single("bytes32", b"SNX"), {"from": er_gov})
+    yield new_oracle
 
 
 @pytest.fixture
