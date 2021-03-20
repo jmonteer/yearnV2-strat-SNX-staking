@@ -95,6 +95,7 @@ contract Strategy is BaseStrategy {
         }
 
         // claim profits from Yearn sUSD Vault
+        // TODO: Update this taking into account that debt is not always == sUSD issued
         if(balanceOfDebt() < balanceOfSUSDInVault()){
             // balance
             uint256 _valueToWithdraw = balanceOfSUSDInVault().sub(balanceOfDebt());
@@ -151,9 +152,9 @@ contract Strategy is BaseStrategy {
         // issue debt (sUSD) if the ratio is too low
         // collateralisation_ratio = debt / collat
         if(_currentRatio < _targetRatio) {
-            // issue debt
-            //_synthetix().issueMaxSynths();
-            issueTargetSynths();
+            // issue debt to reach 500% c-ratio
+            _synthetix().issueMaxSynths();
+            //issueTargetSynths();
             
         } else if(_currentRatio > _targetRatio){
             // burn debt
@@ -190,14 +191,11 @@ contract Strategy is BaseStrategy {
         }
     }
 
-
     function getTargetDebt(uint _collateral) internal returns (uint256){
         uint256 _targetRatio = getTargetRatio();
         uint256 _collateralInSUSD = wantToSUSD(_collateral);
         return _targetRatio.mul(_collateralInSUSD);
     }
-
-    
 
     function liquidatePosition(uint256 _amountNeeded)
         internal
@@ -207,17 +205,66 @@ contract Strategy is BaseStrategy {
         // if want balance is not enough, repay debt to unlock enough `want` to repay debt
         // balanceOfWant includes profit just claimed in `prepareReturn`
         if (balanceOfWant() < _amountNeeded) {
-            reduceCollateral(_amountNeeded.sub(balanceOfWant()));
+            // NOTE: we use _unlockedCollateral because want balance is always the total amount of staked + unstaked want (SNX)
+            reduceCollateral(_amountNeeded.sub(_unlockedCollateral()));
         }
 
-        uint256 totalAssets = balanceOfWant();
+        // 
+        uint256 _unlockedWant = _unlockedCollateral();
         // if not enough want in balance, it means the strategy lost `want`
-        if (_amountNeeded > totalAssets) {
-            _liquidatedAmount = totalAssets;
-            _loss = _amountNeeded.sub(totalAssets);
+        if (_amountNeeded > _unlockedWant) {
+            _liquidatedAmount = _unlockedWant;
+            _loss = _amountNeeded.sub(_unlockedWant);
         } else {
             _liquidatedAmount = _amountNeeded;
         }
+    }
+
+    function _unlockedCollateral() internal returns (uint256) {
+        return balanceOfWant().sub(_lockedCollateral());
+    }
+
+    function reduceCollateral(uint amountToFree) internal {
+        // amountToFree cannot be higher than lockedCollateral
+        // TODO: is it worth it to change this to a Math.min(amountToFree, _lockedCollateral()) ? 
+        // CONT: to avoid trying to unlock more than locked
+        require(amountToFree <= _lockedCollateral(), "not enough collateral locked");
+        if(amountToFree == 0) {
+            return;
+        }
+
+        uint256 _currentDebt = balanceOfDebt();
+        uint256 _newCollateral = _lockedCollateral().sub(amountToFree);
+        // NOTE: _newCollateral will always be < _lockedCollateral() so _targetDebt will always be < _currentDebt
+        uint256 _targetDebt = _newCollateral.mul(getIssuanceRatio()).div(1e18);
+
+        uint256 _amountToRepay = _currentDebt.sub(_targetDebt);
+
+        repayDebt(_amountToRepay);
+    }
+
+    function repayDebt(uint256 _amountToRepay) internal {
+        if(_amountToRepay <= 0) {
+            return;
+        }
+
+        // TODO: what to do in case of waitingPeriod?
+        // TODO: confirm this is the right usage for waitingPeriod
+        if(!_synthetix().isWaitingPeriod("sUSD")){
+            _synthetix().burnSynths(_amountToRepay);
+        }
+    }
+
+    function _lockedCollateral() internal returns (uint256) {
+        // want (SNX) that is not transferable (to keep max 500% c-ratio)
+        uint256 _debt = balanceOfDebt();
+        // NOTE: issuanceRatio is returned as debt/collateral. This is, 500% c-ratio is 0.2 collateralisationRatio 
+        uint256 _collateralRequired = _debt.mul(1e18).div(getIssuanceRatio()); // collateral required to keep 500% c-ratio
+
+        uint256 _balance = balanceOfWant();
+
+        // Return the minimum value because in case the strategy's c-ratio is below 500%, the locked amount is the total SNX balance
+        return Math.min(_balance, _collateralRequired);
     }
 
     function prepareMigration(address _newStrategy) internal override {
@@ -256,13 +303,16 @@ contract Strategy is BaseStrategy {
     //     targetRatioMultiplier = _targetRatioMultiplier;
     // }
 
-    function getTargetRatio() public view returns (uint256) {
+    function getIssuanceRatio() public view returns (uint256) {
         return _issuer().issuanceRatio();
-        // return _issuer().issuanceRatio().mul(targetRatioMultiplier).div(MAX_BPS);
     }
 
-    function reduceCollateral(uint256 _amount) internal {
-                
+    function getTargetRatio() public view returns (uint256) {
+        return _issuer().issuanceRatio().mul(targetRatioMultiplier).div(MAX_BPS);
+    }
+
+    function repayToRatio(uint256 _amount) internal {
+        
     }
 
     function balanceOfWant() public view returns (uint256) {
