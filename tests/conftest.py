@@ -82,7 +82,7 @@ def snx():
 
 @pytest.fixture
 def susd_whale(accounts):
-    yield accounts.at("0x57ab1ec28d129707052df4df418d58a2d46d5f51", force=True)
+    yield accounts.at("0x49BE88F0fcC3A8393a59d3688480d7D253C37D2A", force=True)
 
 
 @pytest.fixture
