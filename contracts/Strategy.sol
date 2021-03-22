@@ -68,6 +68,14 @@ contract Strategy is BaseStrategy {
                 .sub(sUSDToWant(balanceOfDebt()));
     }
 
+    event PrepareReturn(uint256 profit, uint256 loss, uint256 debtPayment);
+    event DebtState(
+        uint256 balanceOfDebt,
+        uint256 lockedCollateral,
+        uint256 unlockedCollateral,
+        uint256 currentRatio
+    );
+
     function prepareReturn(uint256 _debtOutstanding)
         internal
         override
@@ -93,6 +101,14 @@ contract Strategy is BaseStrategy {
                 _profit = 0;
             }
         }
+
+        emit PrepareReturn(_profit, _loss, _debtPayment);
+        emit DebtState(
+            balanceOfDebt(),
+            _lockedCollateral(),
+            _unlockedCollateral(),
+            getCurrentRatio()
+        );
     }
 
     function claimProfits() internal returns (bool) {
@@ -208,16 +224,21 @@ contract Strategy is BaseStrategy {
         return _targetRatio.mul(_collateralInSUSD);
     }
 
+    event LiquidatePosition(uint256 amount);
+    event ReduceCollateral(uint256 amount);
+
     function liquidatePosition(uint256 _amountNeeded)
         internal
         override
         returns (uint256 _liquidatedAmount, uint256 _loss)
     {
+        emit LiquidatePosition(_amountNeeded);
         // if unlocked collateral balance is not enough, repay debt to unlock
         // enough `want` to repay debt.
         // unlocked collateral includes profit just claimed in `prepareReturn`
         uint unlockedWant = _unlockedCollateral();
         if (unlockedWant < _amountNeeded) {
+            emit ReduceCollateral(_amountNeeded.sub(_unlockedCollateral()));
             // NOTE: we use _unlockedCollateral because want balance is always the total amount of staked + unstaked want (SNX)
             reduceCollateral(_amountNeeded.sub(unlockedWant));
         }
@@ -239,6 +260,12 @@ contract Strategy is BaseStrategy {
         return balanceOfWant().sub(_lockedCollateral());
     }
 
+    event InsideReduceCollateral(
+        uint256 newCollat,
+        uint256 targetDebt,
+        uint256 amountToRepay
+    );
+
     function reduceCollateral(uint256 amountToFree) internal {
         // amountToFree cannot be higher than lockedCollateral
         // TODO: is it worth it to change this to a Math.min(amountToFree, _lockedCollateral()) ?
@@ -257,6 +284,11 @@ contract Strategy is BaseStrategy {
         // NOTE: _newCollateral will always be < _lockedCollateral() so _targetDebt will always be < _currentDebt
         uint256 _amountToRepay = _currentDebt.sub(_targetDebt);
 
+        emit InsideReduceCollateral(
+            _newCollateral,
+            _targetDebt,
+            _amountToRepay
+        );
         repayDebt(_amountToRepay);
     }
 
