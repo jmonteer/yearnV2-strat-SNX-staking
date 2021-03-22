@@ -18,11 +18,24 @@ interface IER {
     ) external returns (bool);
 }
 
+interface ISynthetix {
+    function availableCurrencyKeys() external view returns (bytes32[] memory);
+
+    function availableSynthCount() external view returns (uint256);
+}
+
 contract SnxOracle {
     IER public exchangeRate;
+    ISynthetix public synthetix;
 
     constructor(address _exchangeRates) public {
         exchangeRate = IER(_exchangeRates);
+        //synthetix = ISynthetix(_synthetix);
+    }
+
+    function updateAllPrices() external {
+        uint256 _count = synthetix.availableSynthCount();
+        bytes32[] memory keys = synthetix.availableCurrencyKeys();
     }
 
     function updateSnxPrice(uint256 _price) external {
