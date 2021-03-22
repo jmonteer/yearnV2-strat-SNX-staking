@@ -41,7 +41,7 @@ contract Strategy is BaseStrategy {
     ISushiRouter public constant sushi =
         ISushiRouter(address(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D));
 
-    uint256 public targetRatioMultiplier = 9_000;
+    uint256 public targetRatioMultiplier = 15_000;
     IVault public immutable susdVault;
 
     constructor(address _vault, address _susdVault)
@@ -110,8 +110,9 @@ contract Strategy is BaseStrategy {
             getCurrentRatio()
         );
     }
-
     function claimProfits() internal returns (bool) {
+        // two profit sources: Synthetix protocol and Yearn sUSD Vault
+
         if (estimatedProfit() > 0) {
             // claim fees from Synthetix
             // claim fees (in sUSD) and rewards (in want (SNX))
@@ -120,15 +121,16 @@ contract Strategy is BaseStrategy {
 
         // claim profits from Yearn sUSD Vault
         // TODO: Update this taking into account that debt is not always == sUSD issued
+        // jmonteer: I would not withdraw profits until the balanceOfDebt is lower than balanceOfSusdInVault
+        // jmonteer: even if it is technically in profits because amount deposited is lower than amount to withdraw
         if (balanceOfDebt() < balanceOfSusdInVault()) {
             // balance
-            uint256 _valueToWithdraw =
-                balanceOfSusdInVault().sub(balanceOfDebt());
+            uint256 _valueToWithdraw = balanceOfSusdInVault().sub(balanceOfDebt());
             withdrawFromSUSDVault(_valueToWithdraw);
         }
-
         // sell profits in sUSD for want (SNX) using sushiswap
         uint256 _balance = balanceOfSusd();
+
         if (_balance > 0) {
             buyWantWithSusd(_balance);
         }
@@ -184,18 +186,20 @@ contract Strategy is BaseStrategy {
             return;
         }
 
-        // compare current ratio with target ratio
-        uint256 _currentRatio = getCurrentRatio();
-        uint256 _targetRatio = getTargetRatio();
         // burn debt (sUSD) if the ratio is too high
         // issue debt (sUSD) if the ratio is too low
         // collateralisation_ratio = debt / collat
-        if (_currentRatio < _targetRatio) {
-            // issue debt to reach 500% c-ratio
+        if(_synthetix().maxIssuableSynths(address(this)) >= MIN_ISSUE) {
             _synthetix().issueMaxSynths();
-        } else if (_currentRatio > _targetRatio) {
-            // TODO: calculate debt to be repaid
+        }
+
+        // compare current ratio with target ratio
+        uint256 _currentRatio = getCurrentRatio();
+        uint256 _targetRatio = getTargetRatio();
+
+        if (_currentRatio > _targetRatio) {        
             uint256 _debtToRepay = 0;
+            
             repayDebt(_debtToRepay);
         }
 
@@ -205,6 +209,10 @@ contract Strategy is BaseStrategy {
         }
     }
 
+    event AdjustPosition(uint currentRatio, uint targetRatio, uint susdBalance);
+
+
+    // TODO: REMOVE FUNCTION
     function issueTargetSynths() internal {
         uint256 _toIssue = getAmountToIssue();
         if (_toIssue == 0) {
@@ -212,10 +220,11 @@ contract Strategy is BaseStrategy {
         }
 
         // NOTE: we issue the amount to reach target ratio even if we are not able to deposit it
-        // in the yearn sUSD Vault because the rewards a
+        // in the yearn sUSD Vault because the rewards
         _synthetix().issueSynths(_toIssue);
     }
 
+    // TODO: REMOVE FUNCTION
     function getAmountToIssue() internal returns (uint256) {
         if (getCurrentRatio() >= getTargetRatio()) {
             return 0;
@@ -303,6 +312,7 @@ contract Strategy is BaseStrategy {
             _targetDebt,
             _amountToRepay
         );
+
         repayDebt(_amountToRepay);
     }
 
@@ -328,8 +338,7 @@ contract Strategy is BaseStrategy {
 
             // we withdraw from susdvault
             uint _withdrawAmount = amountToRepay.sub(currentSusdBalance);
-            uint _withdrawShares = _withdrawAmount.mul(1e18).div(susdVault.pricePerShare());
-            susdVault.withdraw(_withdrawShares);
+            withdrawFromSUSDVault(_withdrawAmount);
 
             // we fetch sUSD balance for a second time and check if now there is enough
             currentSusdBalance = balanceOfSusd();
@@ -401,7 +410,8 @@ contract Strategy is BaseStrategy {
             return false;
         }
 
-        return _currentRatio.sub(_targetRatio) < 30000;
+        // only return true if the difference is greater than a threshold 
+        return _currentRatio.sub(_targetRatio) >= 1e16;
     }
 
     function getCurrentRatio() public view returns (uint256) {
@@ -424,10 +434,6 @@ contract Strategy is BaseStrategy {
     function getTargetRatio() public view returns (uint256) {
         return
             _issuer().issuanceRatio().mul(targetRatioMultiplier).div(MAX_BPS);
-    }
-
-    function repayToRatio(uint256 _amount) internal {
-        // TODO
     }
 
     function balanceOfWant() public view returns (uint256) {

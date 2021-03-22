@@ -30,8 +30,10 @@ def test_happy_path(
     snx.approve(vault, 2 ** 256 - 1, {"from": bob})
     vault.deposit({"from": bob})
 
+
     # Invest with an SNX price of 20
     snx_oracle.updateSnxPrice(Wei("20 ether"), {"from": gov})
+    assert 1 != 1
     strategy.harvest({"from": gov})
     assert strategy.balanceOfWant() == Wei("1000 ether")
     assert strategy.balanceOfSusd() == 0
