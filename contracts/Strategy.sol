@@ -161,6 +161,20 @@ contract Strategy is BaseStrategy {
         sushi.swapExactTokensForTokens(_amount, 0, path, address(this), now);
     }
 
+    function buySusdWithWant(uint256 _amount) internal {
+        if (_amount == 0) {
+            return;
+        }
+
+        address[] memory path = new address[](3);
+        path[0] = address(want);
+        path[1] = address(WETH);
+        path[2] = address(susd);
+
+        // we use swapTokensForExactTokens because we need an exact sUSD amount
+        sushi.swapTokensForExactTokens(_amount, type(uint256).max, path, address(this), now);
+    }
+
     function adjustPosition(uint256 _debtOutstanding) internal override {
         if (emergencyExit) {
             return;
@@ -293,38 +307,63 @@ contract Strategy is BaseStrategy {
     }
 
     function repayDebt(uint256 amountToRepay) internal {
+        // debt can grow over the amount of sUSD minted (see Synthetix docs)
+        // if that happens, we might not have enough sUSD to repay debt
+        // if we withdraw in this situation, we need to sell `want` to repay debt and would have losses 
+        // this can only be done if c-Ratio is over 272% (otherwise there is not enough unlocked)
         if (amountToRepay <= 0) {
             return;
         }
 
         uint _debtBalance = balanceOfDebt();
+        require(amountToRepay <= _debtBalance, "!not enough debt to be repaid");
         // in case the strategy is going to repay almost all debt, it repays the total amount of debt
         if(_debtBalance.sub(amountToRepay) <= MIN_ISSUE) {
             amountToRepay = _debtBalance;
         }
 
-        // TODO: should do Math.min() to repay max possible?
-        require(amountToRepay <= balanceOfSusdInVault().add(balanceOfSusd()), "!not enough balance to repay debt");
-
-        if(amountToRepay > balanceOfSusd()) {
+        uint256 currentSusdBalance = balanceOfSusd();
+        if(amountToRepay > currentSusdBalance) {
             // there is not enough balance in strategy to repay debt
+
             // we withdraw from susdvault
-            uint _withdrawAmount = amountToRepay.sub(balanceOfSusd());
+            uint _withdrawAmount = amountToRepay.sub(currentSusdBalance);
             uint _withdrawShares = _withdrawAmount.mul(1e18).div(susdVault.pricePerShare());
             susdVault.withdraw(_withdrawShares);
-            if(amountToRepay.sub(balanceOfSusd()) > balanceOfSusdInVault()) {
-                // there is not enough balance in sUSDvault to repay required debt
-                // if debt is too high to be repaid using current funds, the strategy should: 
+
+            // we fetch sUSD balance for a second time and check if now there is enough
+            currentSusdBalance = balanceOfSusd();
+            if(amountToRepay > currentSusdBalance) {
+                // there was not enough balance in strategy and sUSDvault to repay debt
+
+                // debt is too high to be repaid using current funds, the strategy should: 
                 // 1. repay max amount of debt
                 // 2. sell unlocked want to buy required sUSD to pay remaining debt
                 // 3. repay debt
+
+                if(currentSusdBalance > 0) {
+                    // we burn the full sUSD balance to unlock `want` (SNX) in order to sell
+                    burnSusd(currentSusdBalance);
+                    amountToRepay = amountToRepay.sub(currentSusdBalance);
+                }
+
+                // buy enough sUSD to repay outstanding debt, selling `want` (SNX) 
+                buySusdWithWant(amountToRepay);
+                // amountToRepay should equal balanceOfSusd() (we just bought `amountToRepay` sUSD)
             }
         }
 
+        // repay sUSD debt by burning the synth
+        if(amountToRepay > 0) {
+            burnSusd(amountToRepay);
+        }
+    }
+
+    function burnSusd(uint256 _amount) internal {
         // TODO: what to do in case of waitingPeriod?
         // TODO: confirm this is the right usage for waitingPeriod
         if (!_synthetix().isWaitingPeriod("sUSD")) {
-            _synthetix().burnSynths(amountToRepay);
+            _synthetix().burnSynths(_amount);
         }
     }
 
