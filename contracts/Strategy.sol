@@ -180,7 +180,9 @@ contract Strategy is BaseStrategy {
             // issue debt to reach 500% c-ratio
             _synthetix().issueMaxSynths();
         } else if (_currentRatio > _targetRatio) {
-            reduceDebt();
+            // TODO: calculate debt to be repaid
+            uint256 _debtToRepay = 0;
+            repayDebt(_debtToRepay);
         }
 
         // If there is susd in the strategy, send it to the susd vault
@@ -234,25 +236,27 @@ contract Strategy is BaseStrategy {
         // if unlocked collateral balance is not enough, repay debt to unlock
         // enough `want` to repay debt.
         // unlocked collateral includes profit just claimed in `prepareReturn`
-        if (_unlockedCollateral() <= _amountNeeded) {
+        uint unlockedWant = _unlockedCollateral();
+        if (unlockedWant < _amountNeeded) {
             emit ReduceCollateral(_amountNeeded.sub(_unlockedCollateral()));
             // NOTE: we use _unlockedCollateral because want balance is always the total amount of staked + unstaked want (SNX)
-            reduceCollateral(_amountNeeded.sub(_unlockedCollateral()));
+            reduceCollateral(_amountNeeded.sub(unlockedWant));
         }
 
         // Fetch the unlocked collateral for a second time
-        uint256 _unlockedWant = _unlockedCollateral();
+        // to update after repaying debt
+        unlockedWant = _unlockedCollateral();
         // if not enough want in balance, it means the strategy lost `want`
-        if (_amountNeeded > _unlockedWant) {
-            _liquidatedAmount = _unlockedWant;
-            _loss = _amountNeeded.sub(_unlockedWant);
+        if (_amountNeeded > unlockedWant) {
+            _liquidatedAmount = unlockedWant;
+            _loss = _amountNeeded.sub(unlockedWant);
         } else {
             _liquidatedAmount = _amountNeeded;
         }
     }
 
     // TODO change to internal
-    function _unlockedCollateral() public view returns (uint256) {
+    function _unlockedCollateral() internal view returns (uint256) {
         return balanceOfWant().sub(_lockedCollateral());
     }
 
@@ -276,9 +280,8 @@ contract Strategy is BaseStrategy {
 
         uint256 _currentDebt = balanceOfDebt();
         uint256 _newCollateral = _lockedCollateral().sub(amountToFree);
-        // NOTE: _newCollateral will always be < _lockedCollateral() so _targetDebt will always be < _currentDebt
         uint256 _targetDebt = _newCollateral.mul(getIssuanceRatio()).div(1e18);
-
+        // NOTE: _newCollateral will always be < _lockedCollateral() so _targetDebt will always be < _currentDebt
         uint256 _amountToRepay = _currentDebt.sub(_targetDebt);
 
         emit InsideReduceCollateral(
@@ -289,19 +292,41 @@ contract Strategy is BaseStrategy {
         repayDebt(_amountToRepay);
     }
 
-    function repayDebt(uint256 _amountToRepay) internal {
-        if (_amountToRepay <= 0) {
+    function repayDebt(uint256 amountToRepay) internal {
+        if (amountToRepay <= 0) {
             return;
+        }
+
+        uint _debtBalance = balanceOfDebt();
+        // in case the strategy is going to repay almost all debt, it repays the total amount of debt
+        if(_debtBalance.sub(amountToRepay) <= MIN_ISSUE) {
+            amountToRepay = _debtBalance;
+        }
+
+        // TODO: should do Math.min() to repay max possible?
+        require(amountToRepay <= balanceOfSusdInVault().add(balanceOfSusd()), "!not enough balance to repay debt");
+
+        if(amountToRepay > balanceOfSusd()) {
+            // there is not enough balance in strategy to repay debt
+            // we withdraw from susdvault
+            uint _withdrawAmount = amountToRepay.sub(balanceOfSusd());
+            uint _withdrawShares = _withdrawAmount.mul(1e18).div(susdVault.pricePerShare());
+            susdVault.withdraw(_withdrawShares);
+            if(amountToRepay.sub(balanceOfSusd()) > balanceOfSusdInVault()) {
+                // there is not enough balance in sUSDvault to repay required debt
+                // if debt is too high to be repaid using current funds, the strategy should: 
+                // 1. repay max amount of debt
+                // 2. sell unlocked want to buy required sUSD to pay remaining debt
+                // 3. repay debt
+            }
         }
 
         // TODO: what to do in case of waitingPeriod?
         // TODO: confirm this is the right usage for waitingPeriod
         if (!_synthetix().isWaitingPeriod("sUSD")) {
-            _synthetix().burnSynths(_amountToRepay);
+            _synthetix().burnSynths(amountToRepay);
         }
     }
-
-    function reduceDebt() internal returns (uint256) {}
 
     function _lockedCollateral() public view returns (uint256) {
         // want (SNX) that is not transferable (to keep max 500% c-ratio)
@@ -309,10 +334,9 @@ contract Strategy is BaseStrategy {
         // NOTE: issuanceRatio is returned as debt/collateral. This is, 500% c-ratio is 0.2 collateralisationRatio
         uint256 _collateralRequired = _debt.mul(1e18).div(getIssuanceRatio()); // collateral required to keep 500% c-ratio
 
-        uint256 _balance = balanceOfWant();
-
-        // Return the minimum value because in case the strategy's c-ratio is below 500%, the locked amount is the total SNX balance
-        return Math.min(_balance, _collateralRequired);
+        uint256 _wantBalance = balanceOfWant();
+        // if the strategy's c-ratio is below 500%, the locked amount is the total SNX balance
+        return Math.min(_wantBalance, _collateralRequired);
     }
 
     function prepareMigration(address _newStrategy) internal override {
