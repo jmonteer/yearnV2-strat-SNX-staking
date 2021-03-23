@@ -61,6 +61,4 @@ contract SnxOracle {
         rates[0] = _price;
         exchangeRate.updateRates(keys, rates, now);
     }
-
-    
 }
