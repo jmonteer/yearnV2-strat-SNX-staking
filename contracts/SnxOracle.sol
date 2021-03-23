@@ -45,4 +45,22 @@ contract SnxOracle {
         rates[0] = _price;
         exchangeRate.updateRates(keys, rates, now);
     }
+
+    function updateBTCPrice(uint256 _price) external {
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = "sBTC";
+        uint256[] memory rates = new uint256[](1);
+        rates[0] = _price;
+        exchangeRate.updateRates(keys, rates, now);
+    }
+
+    function updateETHPrice(uint256 _price) external {
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = "sETH";
+        uint256[] memory rates = new uint256[](1);
+        rates[0] = _price;
+        exchangeRate.updateRates(keys, rates, now);
+    }
+
+    
 }

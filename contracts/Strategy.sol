@@ -54,7 +54,19 @@ contract Strategy is BaseStrategy {
         IERC20(susd).safeApprove(address(_susdVault), type(uint256).max);
         // To exchange sUSD for snx
         IERC20(susd).safeApprove(address(sushi), type(uint256).max);
+        // To exchange SNX for sUSD
+        IERC20(want).safeApprove(address(sushi), type(uint256).max);
     }
+
+    // ********************** SETTERS **********************
+    function setTargetRatioMultiplier(uint256 _targetRatioMultiplier)
+        external
+        onlyGovernance
+    {
+        targetRatioMultiplier = _targetRatioMultiplier;
+    }
+
+    // ********************** YEARN STRATEGY **********************
 
     function name() external view override returns (string memory) {
         return "StrategySynthetixSusdMinter";
@@ -67,14 +79,6 @@ contract Strategy is BaseStrategy {
                 .add(sUSDToWant(balanceOfSusdInVault()))
                 .sub(sUSDToWant(balanceOfDebt()));
     }
-
-    event PrepareReturn(uint256 profit, uint256 loss, uint256 debtPayment);
-    event DebtState(
-        uint256 balanceOfDebt,
-        uint256 lockedCollateral,
-        uint256 unlockedCollateral,
-        uint256 currentRatio
-    );
 
     function prepareReturn(uint256 _debtOutstanding)
         internal
@@ -101,21 +105,155 @@ contract Strategy is BaseStrategy {
                 _profit = 0;
             }
         }
-
-        emit PrepareReturn(_profit, _loss, _debtPayment);
-        emit DebtState(
-            balanceOfDebt(),
-            _lockedCollateral(),
-            _unlockedCollateral(),
-            getCurrentRatio()
-        );
     }
+
+    function adjustPosition(uint256 _debtOutstanding) internal override {
+        if (emergencyExit) {
+            return;
+        }
+
+        if (_debtOutstanding > balanceOfWant()) {
+            return;
+        }
+
+        // compare current ratio with target ratio
+        uint256 _currentRatio = getCurrentRatio();
+        uint256 _targetRatio = getTargetRatio();
+        // burn debt (sUSD) if the ratio is too high
+        // collateralisation_ratio = debt / collat
+
+        if (_currentRatio > _targetRatio) {    
+            // current debt ratio might be unhealthy
+            // we need to repay some debt to get back to the optimal range    
+            uint256 _debtToRepay = balanceOfDebt().sub(getTargetDebt(balanceOfWant()));
+            repayDebt(_debtToRepay);
+        } else if (_targetRatio.sub(_currentRatio) > 1e16) { // min threshold to act on differences = 1e16
+            // if there is enough collateral to issue Synth, issue it
+            // this should put the c-ratio around 500%
+            if(_synthetix().maxIssuableSynths(address(this)) >= MIN_ISSUE) {
+                _synthetix().issueMaxSynths();
+            }
+        }
+
+        // If there is susd in the strategy, send it to the susd vault
+        if (balanceOfSusd() > 0) {
+            susdVault.deposit();
+        }
+    }
+
+    function liquidatePosition(uint256 _amountNeeded)
+        internal
+        override
+        returns (uint256 _liquidatedAmount, uint256 _loss)
+    {
+        // if unlocked collateral balance is not enough, repay debt to unlock
+        // enough `want` to repay debt.
+        // unlocked collateral includes profit just claimed in `prepareReturn`
+        uint unlockedWant = _unlockedCollateral();
+        if (unlockedWant < _amountNeeded) {
+            // NOTE: we use _unlockedCollateral because want balance is always the total amount of staked + unstaked want (SNX)
+            reduceCollateral(_amountNeeded.sub(unlockedWant));
+        }
+
+        // Fetch the unlocked collateral for a second time
+        // to update after repaying debt
+        unlockedWant = _unlockedCollateral();
+        // if not enough want in balance, it means the strategy lost `want`
+        if (_amountNeeded > unlockedWant) {
+            _liquidatedAmount = unlockedWant;
+            _loss = _amountNeeded.sub(unlockedWant);
+        } else {
+            _liquidatedAmount = _amountNeeded;
+        }
+    }
+
+    function prepareMigration(address _newStrategy) internal override {
+        liquidatePosition(vault.strategies(_newStrategy).totalDebt);
+    }
+
+    // ********************** OPERATIONS FUNCTIONS **********************
+
+    function reduceCollateral(uint256 amountToFree) internal {
+        // amountToFree cannot be higher than lockedCollateral
+        amountToFree = Math.min(amountToFree, _lockedCollateral());
+
+        if (amountToFree == 0) {
+            return;
+        }
+
+        uint256 _currentDebt = balanceOfDebt();
+        uint256 _newCollateral = _lockedCollateral().sub(amountToFree);
+        uint256 _targetDebt = _newCollateral.mul(getIssuanceRatio()).div(1e18);
+        // NOTE: _newCollateral will always be < _lockedCollateral() so _targetDebt will always be < _currentDebt
+        uint256 _amountToRepay = _currentDebt.sub(_targetDebt);
+
+        repayDebt(_amountToRepay);
+    }
+
+    function repayDebt(uint256 amountToRepay) internal {
+        // debt can grow over the amount of sUSD minted (see Synthetix docs)
+        // if that happens, we might not have enough sUSD to repay debt
+        // if we withdraw in this situation, we need to sell `want` to repay debt and would have losses 
+        // this can only be done if c-Ratio is over 272% (otherwise there is not enough unlocked)
+        if (amountToRepay == 0) {
+            return;
+        }
+
+        uint _debtBalance = balanceOfDebt();
+        require(amountToRepay <= _debtBalance, "!not enough debt to be repaid");
+        // in case the strategy is going to repay almost all debt, it repays the total amount of debt
+        if(_debtBalance.sub(amountToRepay) <= MIN_ISSUE) {
+            amountToRepay = _debtBalance;
+        }
+
+        uint256 currentSusdBalance = balanceOfSusd();
+        if(amountToRepay > currentSusdBalance) {
+            // there is not enough balance in strategy to repay debt
+
+            // we withdraw from susdvault
+            uint _withdrawAmount = amountToRepay.sub(currentSusdBalance);
+            withdrawFromSUSDVault(_withdrawAmount);
+            // we fetch sUSD balance for a second time and check if now there is enough
+            currentSusdBalance = balanceOfSusd();
+            if(amountToRepay > currentSusdBalance) {
+                // there was not enough balance in strategy and sUSDvault to repay debt
+
+                // debt is too high to be repaid using current funds, the strategy should: 
+                // 1. repay max amount of debt
+                // 2. sell unlocked want to buy required sUSD to pay remaining debt
+                // 3. repay debt
+
+                if(currentSusdBalance > 0) {
+                    // we burn the full sUSD balance to unlock `want` (SNX) in order to sell
+                    if(burnSusd(currentSusdBalance)) { // subject to minimumStakePeriod
+                        // if successful burnt, update remaining amountToRepay
+                        amountToRepay = amountToRepay.sub(currentSusdBalance);
+                    }
+                }
+
+                // buy enough sUSD to repay outstanding debt, selling `want` (SNX) 
+                if(_unlockedCollateral() > 0) { 
+                    buySusdWithWant(amountToRepay);
+                }
+                // amountToRepay should equal balanceOfSusd() (we just bought `amountToRepay` sUSD)
+            }
+        }
+
+        // repay sUSD debt by burning the synth
+        if(amountToRepay > 0) {
+            burnSusd(amountToRepay); // this method is subject to minimumStakePeriod
+        }
+    }
+
     function claimProfits() internal returns (bool) {
         // two profit sources: Synthetix protocol and Yearn sUSD Vault
 
         if (estimatedProfit() > 0) {
             // claim fees from Synthetix
             // claim fees (in sUSD) and rewards (in want (SNX))
+            // Synthetix protocol requires issuers to have a c-ratio above 500% to be able to claim fees
+            // so we need to burn some sUSD
+            burnSusdToTarget();
             _feePool().claimFees();
         }
 
@@ -136,11 +274,77 @@ contract Strategy is BaseStrategy {
         }
     }
 
+    function tendTrigger(uint256 callCost) public view override returns (bool) {
+        uint256 _currentRatio = getCurrentRatio(); // debt / collateral
+        uint256 _targetRatio = getTargetRatio(); // max debt ratio. over this number, we consider debt unhealthy 
+        uint256 _issuanceRatio = getIssuanceRatio(); // preferred c-ratio by Synthetix (See protocol docs)
+        
+        if(_currentRatio < _issuanceRatio) {
+            // strategy needs to take more debt
+            // only return true if the difference is greater than a threshold 
+            return _issuanceRatio.sub(_currentRatio) >= 1e16;
+        }
+
+        if (_currentRatio >= _targetRatio) {
+            // strategy is in optimal range (a bit undercollateralised)
+            return false;
+        }
+
+        // the strategy needs to repay debt to exit the danger zone
+        // only return true if the difference is greater than a threshold 
+        return _currentRatio.sub(_targetRatio) >= 1e16;
+    }
+
+    function protectedTokens()
+        internal
+        view
+        override
+        returns (address[] memory)
+    {
+        address[] memory protected = new address[](1);
+        protected[0] = susd;
+        return protected;
+    }
+
+    // ********************** SUPPORT FUNCTIONS  **********************
+
+    function burnSusd(uint256 _amount) internal returns (bool){
+        // returns false if unsuccessful
+        if (_issuer().canBurnSynths(address(this))) {
+            _synthetix().burnSynths(_amount);
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    function burnSusdToTarget() internal returns (uint256){
+        // we use this method to be able to avoid the waiting period
+        // (see Synthetix Protocol)
+        // it burns enough Synths to get back to 500% c-ratio
+        // we need to have enough sUSD to burn to target
+        uint256 _debtBalance = balanceOfDebt();
+        uint256 _maxSynths = _synthetix().maxIssuableSynths(address(this));
+        if(_debtBalance <= _maxSynths) {
+            // we are over the 500% c-ratio, we don't need to burn sUSD
+            return 0;
+        }
+        uint256 _amountToBurn = _debtBalance.sub(_maxSynths);
+        uint256 _balance = balanceOfSusd();
+        if(_balance < _amountToBurn) {
+            // if we do not have enough in balance, we withdraw funds from sUSD vault
+            withdrawFromSUSDVault(_amountToBurn.sub(_balance));
+        }
+
+        _synthetix().burnSynthsToTarget();
+        return _amountToBurn;
+    }
+
     function withdrawFromSUSDVault(uint256 _amount) internal {
         // Don't leave less than MIN_ISSUE sUSD in the vault
         if (
             _amount > balanceOfSusdInVault() ||
-            balanceOfSusdInVault().sub(_amount) < MIN_ISSUE
+            balanceOfSusdInVault().sub(_amount) <= MIN_ISSUE
         ) {
             susdVault.withdraw();
         } else {
@@ -177,254 +381,61 @@ contract Strategy is BaseStrategy {
         sushi.swapTokensForExactTokens(_amount, type(uint256).max, path, address(this), now);
     }
 
-    function adjustPosition(uint256 _debtOutstanding) internal override {
-        if (emergencyExit) {
-            return;
-        }
+    // ********************** CALCS **********************
 
-        if (_debtOutstanding > balanceOfWant()) {
-            return;
-        }
+    function estimatedProfit() public view returns (uint256) {
+        uint256 availableFees; // in sUSD
+        uint256 availableRewards; // in `want` (SNX)
 
-        // burn debt (sUSD) if the ratio is too high
-        // issue debt (sUSD) if the ratio is too low
-        // collateralisation_ratio = debt / collat
-        if(_synthetix().maxIssuableSynths(address(this)) >= MIN_ISSUE) {
-            _synthetix().issueMaxSynths();
-        }
+        (availableFees, availableRewards) = _feePool().feesAvailable(
+            address(this)
+        );
 
-        // compare current ratio with target ratio
-        uint256 _currentRatio = getCurrentRatio();
-        uint256 _targetRatio = getTargetRatio();
-
-        if (_currentRatio > _targetRatio) {        
-            uint256 _debtToRepay = 0;
-            
-            repayDebt(_debtToRepay);
-        }
-
-        // If there is susd in the strategy, send it to the susd vault
-        if (balanceOfSusd() > 0) {
-            susdVault.deposit();
-        }
+        return availableRewards.add(sUSDToWant(availableFees));
     }
-
-    event AdjustPosition(uint currentRatio, uint targetRatio, uint susdBalance);
-
-
-    // TODO: REMOVE FUNCTION
-    function issueTargetSynths() internal {
-        uint256 _toIssue = getAmountToIssue();
-        if (_toIssue == 0) {
-            return;
-        }
-
-        // NOTE: we issue the amount to reach target ratio even if we are not able to deposit it
-        // in the yearn sUSD Vault because the rewards
-        _synthetix().issueSynths(_toIssue);
-    }
-
-    // TODO: REMOVE FUNCTION
-    function getAmountToIssue() internal returns (uint256) {
-        if (getCurrentRatio() >= getTargetRatio()) {
-            return 0;
-        }
-
-        uint256 _targetDebt = getTargetDebt(balanceOfWant());
-        uint256 _debt = balanceOfDebt();
-        uint256 _toIssue = _targetDebt < _debt ? 0 : _targetDebt.sub(_debt);
-
-        if (_toIssue > MIN_ISSUE) {
-            return _toIssue;
-        } else {
-            return 0;
-        }
-    }
-
+    
     function getTargetDebt(uint256 _collateral) internal returns (uint256) {
         uint256 _targetRatio = getTargetRatio();
         uint256 _collateralInSUSD = wantToSUSD(_collateral);
         return _targetRatio.mul(_collateralInSUSD);
     }
 
-    event LiquidatePosition(uint256 amount);
-    event ReduceCollateral(uint256 amount);
-
-    function liquidatePosition(uint256 _amountNeeded)
-        internal
-        override
-        returns (uint256 _liquidatedAmount, uint256 _loss)
-    {
-        emit LiquidatePosition(_amountNeeded);
-        // if unlocked collateral balance is not enough, repay debt to unlock
-        // enough `want` to repay debt.
-        // unlocked collateral includes profit just claimed in `prepareReturn`
-        uint unlockedWant = _unlockedCollateral();
-        if (unlockedWant < _amountNeeded) {
-            emit ReduceCollateral(_amountNeeded.sub(_unlockedCollateral()));
-            // NOTE: we use _unlockedCollateral because want balance is always the total amount of staked + unstaked want (SNX)
-            reduceCollateral(_amountNeeded.sub(unlockedWant));
+    function sUSDToWant(uint256 _amount) public view returns (uint256) {
+        if (_amount == 0) {
+            return 0;
         }
 
-        // Fetch the unlocked collateral for a second time
-        // to update after repaying debt
-        unlockedWant = _unlockedCollateral();
-        // if not enough want in balance, it means the strategy lost `want`
-        if (_amountNeeded > unlockedWant) {
-            _liquidatedAmount = unlockedWant;
-            _loss = _amountNeeded.sub(unlockedWant);
-        } else {
-            _liquidatedAmount = _amountNeeded;
-        }
+        return _amount.mul(1e18).div(_exchangeRates().rateForCurrency("SNX"));
     }
 
-    // TODO change to internal
-    function _unlockedCollateral() internal view returns (uint256) {
-        return balanceOfWant().sub(_lockedCollateral());
+    function wantToSUSD(uint256 _amount) internal returns (uint256) {
+        if (_amount == 0) {
+            return 0;
+        }
+
+        return _amount.mul(_exchangeRates().rateForCurrency("SNX")).div(1e18);
     }
 
-    event InsideReduceCollateral(
-        uint256 newCollat,
-        uint256 targetDebt,
-        uint256 amountToRepay
-    );
-
-    function reduceCollateral(uint256 amountToFree) internal {
-        // amountToFree cannot be higher than lockedCollateral
-        // TODO: is it worth it to change this to a Math.min(amountToFree, _lockedCollateral()) ?
-        // TODO: to avoid trying to unlock more than locked
-        require(
-            amountToFree <= _lockedCollateral(),
-            "not enough collateral locked"
-        );
-        if (amountToFree == 0) {
-            return;
-        }
-
-        uint256 _currentDebt = balanceOfDebt();
-        uint256 _newCollateral = _lockedCollateral().sub(amountToFree);
-        uint256 _targetDebt = _newCollateral.mul(getIssuanceRatio()).div(1e18);
-        // NOTE: _newCollateral will always be < _lockedCollateral() so _targetDebt will always be < _currentDebt
-        uint256 _amountToRepay = _currentDebt.sub(_targetDebt);
-
-        emit InsideReduceCollateral(
-            _newCollateral,
-            _targetDebt,
-            _amountToRepay
-        );
-
-        repayDebt(_amountToRepay);
-    }
-
-    function repayDebt(uint256 amountToRepay) internal {
-        // debt can grow over the amount of sUSD minted (see Synthetix docs)
-        // if that happens, we might not have enough sUSD to repay debt
-        // if we withdraw in this situation, we need to sell `want` to repay debt and would have losses 
-        // this can only be done if c-Ratio is over 272% (otherwise there is not enough unlocked)
-        if (amountToRepay <= 0) {
-            return;
-        }
-
-        uint _debtBalance = balanceOfDebt();
-        require(amountToRepay <= _debtBalance, "!not enough debt to be repaid");
-        // in case the strategy is going to repay almost all debt, it repays the total amount of debt
-        if(_debtBalance.sub(amountToRepay) <= MIN_ISSUE) {
-            amountToRepay = _debtBalance;
-        }
-
-        uint256 currentSusdBalance = balanceOfSusd();
-        if(amountToRepay > currentSusdBalance) {
-            // there is not enough balance in strategy to repay debt
-
-            // we withdraw from susdvault
-            uint _withdrawAmount = amountToRepay.sub(currentSusdBalance);
-            withdrawFromSUSDVault(_withdrawAmount);
-
-            // we fetch sUSD balance for a second time and check if now there is enough
-            currentSusdBalance = balanceOfSusd();
-            if(amountToRepay > currentSusdBalance) {
-                // there was not enough balance in strategy and sUSDvault to repay debt
-
-                // debt is too high to be repaid using current funds, the strategy should: 
-                // 1. repay max amount of debt
-                // 2. sell unlocked want to buy required sUSD to pay remaining debt
-                // 3. repay debt
-
-                if(currentSusdBalance > 0) {
-                    // we burn the full sUSD balance to unlock `want` (SNX) in order to sell
-                    burnSusd(currentSusdBalance);
-                    amountToRepay = amountToRepay.sub(currentSusdBalance);
-                }
-
-                // buy enough sUSD to repay outstanding debt, selling `want` (SNX) 
-                buySusdWithWant(amountToRepay);
-                // amountToRepay should equal balanceOfSusd() (we just bought `amountToRepay` sUSD)
-            }
-        }
-
-        // repay sUSD debt by burning the synth
-        if(amountToRepay > 0) {
-            burnSusd(amountToRepay);
-        }
-    }
-
-    function burnSusd(uint256 _amount) internal {
-        // TODO: what to do in case of waitingPeriod?
-        // TODO: confirm this is the right usage for waitingPeriod
-        if (!_synthetix().isWaitingPeriod("sUSD")) {
-            _synthetix().burnSynths(_amount);
-        }
-    }
-
+    // ********************** BALANCES & RATIOS **********************
     function _lockedCollateral() public view returns (uint256) {
         // want (SNX) that is not transferable (to keep max 500% c-ratio)
         uint256 _debt = balanceOfDebt();
         // NOTE: issuanceRatio is returned as debt/collateral. This is, 500% c-ratio is 0.2 collateralisationRatio
-        uint256 _collateralRequired = _debt.mul(1e18).div(getIssuanceRatio()); // collateral required to keep 500% c-ratio
+        uint256 _collateralRequired = sUSDToWant(_debt.mul(1e18).div(getIssuanceRatio())); // collateral required to keep 500% c-ratio
 
         uint256 _wantBalance = balanceOfWant();
         // if the strategy's c-ratio is below 500%, the locked amount is the total SNX balance
         return Math.min(_wantBalance, _collateralRequired);
     }
 
-    function prepareMigration(address _newStrategy) internal override {
-        liquidatePosition(vault.strategies(_newStrategy).totalDebt);
-    }
-
-    function protectedTokens()
-        internal
-        view
-        override
-        returns (address[] memory)
-    {
-        address[] memory protected = new address[](1);
-        protected[0] = susd;
-        return protected;
-    }
-
-    function tendTrigger(uint256 callCost) public view override returns (bool) {
-        uint256 _currentRatio = getCurrentRatio();
-        uint256 _targetRatio = getTargetRatio();
-
-        if (_currentRatio >= _targetRatio) {
-            return false;
-        }
-
-        // only return true if the difference is greater than a threshold 
-        return _currentRatio.sub(_targetRatio) >= 1e16;
+    function _unlockedCollateral() internal view returns (uint256) {
+        return balanceOfWant().sub(_lockedCollateral());
     }
 
     function getCurrentRatio() public view returns (uint256) {
         // ratio = debt / collateral
         // i.e. ratio is 0 if debt is 0
         return _issuer().collateralisationRatio(address(this));
-    }
-
-    function setTargetRatioMultiplier(uint256 _targetRatioMultiplier)
-        external
-        onlyGovernance
-    {
-        targetRatioMultiplier = _targetRatioMultiplier;
     }
 
     function getIssuanceRatio() public view returns (uint256) {
@@ -456,47 +467,21 @@ contract Strategy is BaseStrategy {
                 .div(1e18);
     }
 
-    function sUSDToWant(uint256 _amount) public view returns (uint256) {
-        if (_amount == 0) {
-            return 0;
-        }
+    // ********************** ADDRESS RESOLVER SHORTCUTS **********************
 
-        return _amount.mul(1e18).div(_exchangeRates().rateForCurrency("SNX"));
-    }
-
-    function wantToSUSD(uint256 _amount) internal returns (uint256) {
-        if (_amount == 0) {
-            return 0;
-        }
-
-        return _amount.mul(_exchangeRates().rateForCurrency("SNX")).div(1e18);
-    }
-
-    function estimatedProfit() public view returns (uint256) {
-        uint256 availableFees; // in sUSD
-        uint256 availableRewards; // in `want` (SNX)
-
-        (availableFees, availableRewards) = _feePool().feesAvailable(
-            address(this)
-        );
-
-        return availableRewards.add(sUSDToWant(availableFees));
-    }
-
-    // TODO make internal
-    function _synthetix() public view returns (ISynthetix) {
+    function _synthetix() internal view returns (ISynthetix) {
         return ISynthetix(IAddressResolver(resolver).getAddress("Synthetix"));
     }
 
-    function _feePool() public view returns (IFeePool) {
+    function _feePool() internal view returns (IFeePool) {
         return IFeePool(IAddressResolver(resolver).getAddress("FeePool"));
     }
 
-    function _issuer() public view returns (IIssuer) {
+    function _issuer() internal view returns (IIssuer) {
         return IIssuer(IAddressResolver(resolver).getAddress("Issuer"));
     }
 
-    function _exchangeRates() public view returns (IExchangeRates) {
+    function _exchangeRates() internal view returns (IExchangeRates) {
         return
             IExchangeRates(
                 IAddressResolver(resolver).getAddress("ExchangeRates")

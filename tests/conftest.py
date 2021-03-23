@@ -100,6 +100,8 @@ def snx_oracle(gov, accounts, SnxOracle):
 
     # If we don't remove the aggregator prices update through oracle are not considered
     exchange_rate.removeAggregator(encode_single("bytes32", b"SNX"), {"from": er_gov})
+    exchange_rate.removeAggregator(encode_single("bytes32", b"sBTC"), {"from": er_gov})
+    exchange_rate.removeAggregator(encode_single("bytes32", b"sETH"), {"from": er_gov})
     yield new_oracle
 
 
@@ -118,6 +120,8 @@ def vault(pm, gov, rewards, guardian, management, token):
     vault.initialize(token, gov, rewards, "", "", guardian)
     vault.setDepositLimit(2 ** 256 - 1, {"from": gov})
     vault.setManagement(management, {"from": gov})
+    vault.setPerformanceFee(0, {'from': gov})
+    vault.setManagementFee(0, {'from': gov})
     yield vault
 
 
@@ -125,5 +129,5 @@ def vault(pm, gov, rewards, guardian, management, token):
 def strategy(strategist, keeper, vault, Strategy, gov, susd_vault):
     strategy = strategist.deploy(Strategy, vault, susd_vault)
     strategy.setKeeper(keeper)
-    vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 1_000, {"from": gov})
+    vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
     yield strategy
