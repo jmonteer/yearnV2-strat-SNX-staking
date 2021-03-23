@@ -23,15 +23,14 @@ def test_happy_path(
     )
     settings.setRateStalePeriod(24 * 3600 * 6, {"from": settings.owner()})
     settings.setDebtSnapshotStaleTime(24 * 3600 * 6, {"from": settings.owner()})
-# debtCache = Contract(resolver.getAddress(encode_single('bytes32', b'DebtCache')))
-# snx_oracle.updateBTCPrice(Wei('70000 ether'), {'from': gov})
-# snx_oracle.updateETHPrice(Wei('2000 ether'), {'from': gov})
-# debtCache.takeDebtSnapshot({"from": debtCache.owner()})
+    # debtCache = Contract(resolver.getAddress(encode_single('bytes32', b'DebtCache')))
+    # snx_oracle.updateBTCPrice(Wei('70000 ether'), {'from': gov})
+    # snx_oracle.updateETHPrice(Wei('2000 ether'), {'from': gov})
+    # debtCache.takeDebtSnapshot({"from": debtCache.owner()})
     # Do the first deposit
     snx.transfer(bob, Wei("1000 ether"), {"from": snx_whale})
     snx.approve(vault, 2 ** 256 - 1, {"from": bob})
     vault.deposit({"from": bob})
-
 
     # Invest with an SNX price of 20
     snx_oracle.updateSnxPrice(Wei("20 ether"), {"from": gov})
@@ -43,7 +42,7 @@ def test_happy_path(
     # We need to wait 24hs to be able to burn synths
     # Always takeDebtSnapshot after moving time.
     chain.sleep(86401)
-    chain.mine(1)   
+    chain.mine(1)
 
     # This is extremely slow
     # debtCache.takeDebtSnapshot({"from": debtCache.owner()})
@@ -56,11 +55,11 @@ def test_happy_path(
     chain.sleep(60 * 60 * 8)  # Sleep 8 hours
     chain.mine(1)
     with brownie.reverts():
-        vault.withdraw({'from': bob})
-            
+        vault.withdraw({"from": bob})
+
     chain.sleep(60 * 60 * 24)  # Sleep 24 hours to allow the minimumStakePeriod to pass
     chain.mine(1)
-    
+
     tx = vault.withdraw({"from": bob})
 
     assert snx.balanceOf(bob) > Wei("1000 ether")
