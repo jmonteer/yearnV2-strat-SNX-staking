@@ -1,8 +1,17 @@
-// SPDX-License-Identifier: MIT
-pragma solidity 0.6.12;
+pragma solidity >=0.4.24;
 
+// https://docs.synthetix.io/contracts/source/interfaces/isynthetix
 interface ISynthetix {
     // Views
+    function anySynthOrSNXRateIsInvalid()
+        external
+        view
+        returns (bool anyRateInvalid);
+
+    function availableCurrencyKeys() external view returns (bytes32[] memory);
+
+    function availableSynthCount() external view returns (uint256);
+
     function collateral(address account) external view returns (uint256);
 
     function collateralisationRatio(address issuer)
@@ -31,6 +40,26 @@ interface ISynthetix {
             uint256 totalSystemDebt
         );
 
+    function synthsByAddress(address synthAddress)
+        external
+        view
+        returns (bytes32);
+
+    function totalIssuedSynths(bytes32 currencyKey)
+        external
+        view
+        returns (uint256);
+
+    function totalIssuedSynthsExcludeEtherCollateral(bytes32 currencyKey)
+        external
+        view
+        returns (uint256);
+
+    function transferableSynthetix(address account)
+        external
+        view
+        returns (uint256 transferable);
+
     // Mutative Functions
     function burnSynths(uint256 amount) external;
 
@@ -54,6 +83,23 @@ interface ISynthetix {
         bytes32 destinationCurrencyKey
     ) external returns (uint256 amountReceived);
 
+    function exchangeWithTracking(
+        bytes32 sourceCurrencyKey,
+        uint256 sourceAmount,
+        bytes32 destinationCurrencyKey,
+        address originator,
+        bytes32 trackingCode
+    ) external returns (uint256 amountReceived);
+
+    function exchangeOnBehalfWithTracking(
+        address exchangeForAddress,
+        bytes32 sourceCurrencyKey,
+        uint256 sourceAmount,
+        bytes32 destinationCurrencyKey,
+        address originator,
+        bytes32 trackingCode
+    ) external returns (uint256 amountReceived);
+
     function issueMaxSynths() external;
 
     function issueMaxSynthsOnBehalf(address issueForAddress) external;
@@ -72,4 +118,17 @@ interface ISynthetix {
             uint256 refunded,
             uint256 numEntries
         );
+
+    // Liquidations
+    function liquidateDelinquentAccount(address account, uint256 susdAmount)
+        external
+        returns (bool);
+
+    // Restricted Functions
+
+    function mintSecondary(address account, uint256 amount) external;
+
+    function mintSecondaryRewards(uint256 amount) external;
+
+    function burnSecondary(address account, uint256 amount) external;
 }

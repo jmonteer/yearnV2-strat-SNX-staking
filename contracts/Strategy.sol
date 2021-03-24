@@ -17,6 +17,7 @@ import "../interfaces/IIssuer.sol";
 import "../interfaces/IFeePool.sol";
 import "../interfaces/IAddressResolver.sol";
 import "../interfaces/IExchangeRates.sol";
+import "../interfaces/IRewardEscrowV2.sol";
 
 import "../interfaces/IVault.sol";
 import "../interfaces/ISushiRouter.sol";
@@ -26,9 +27,10 @@ contract Strategy is BaseStrategy {
     using Address for address;
     using SafeMath for uint256;
 
-    uint256 public constant MIN_ISSUE = 50 * 1e18;
+    uint256 public constant MIN_ISSUE = 50 * 1e18; // TODO: update this to avoid constant new issues of synths
     uint256 public constant MAX_RATIO = type(uint256).max;
     uint256 public constant MAX_BPS = 10_000;
+
     address public constant susd =
         address(0x57Ab1ec28D129707052df4dF418D58a2D46d5f51);
     address public constant resolver =
@@ -43,6 +45,16 @@ contract Strategy is BaseStrategy {
 
     uint256 public targetRatioMultiplier = 15_000;
     IVault public immutable susdVault;
+
+    // to keep track of next entry to vest
+    uint256 public entryIDIndex = 0;
+    uint256[] public entryIDs; // entryIDs that have been claimed by the strategy
+
+    bytes32 private constant CONTRACT_SYNTHETIX = "Synthetix";
+    bytes32 private constant CONTRACT_EXRATES = "ExchangeRates";
+    bytes32 private constant CONTRACT_REWARDESCROW_V2 = "RewardEscrowV2";
+    bytes32 private constant CONTRACT_ISSUER = "Issuer";
+    bytes32 private constant CONTRACT_FEEPOOL = "FeePool";
 
     constructor(address _vault, address _susdVault)
         public
@@ -92,6 +104,7 @@ contract Strategy is BaseStrategy {
         uint256 balanceOfWantBefore = balanceOfWant();
 
         claimProfits();
+        vestNextRewardsEntry();
 
         _profit = balanceOfWant().sub(balanceOfWantBefore);
 
@@ -118,6 +131,7 @@ contract Strategy is BaseStrategy {
 
         // compare current ratio with target ratio
         uint256 _currentRatio = getCurrentRatio();
+        // NOTE: target ratio is under 500% to maximize APY
         uint256 _targetRatio = getTargetRatio();
         // burn debt (sUSD) if the ratio is too high
         // collateralisation_ratio = debt / collat
@@ -151,15 +165,15 @@ contract Strategy is BaseStrategy {
         // if unlocked collateral balance is not enough, repay debt to unlock
         // enough `want` to repay debt.
         // unlocked collateral includes profit just claimed in `prepareReturn`
-        uint256 unlockedWant = _unlockedCollateral();
+        uint256 unlockedWant = _unlockedWant();
         if (unlockedWant < _amountNeeded) {
-            // NOTE: we use _unlockedCollateral because want balance is always the total amount of staked + unstaked want (SNX)
-            reduceCollateral(_amountNeeded.sub(unlockedWant));
+            // NOTE: we use _unlockedWant because `want` balance is the total amount of staked + unstaked want (SNX)
+            reduceLockedCollateral(_amountNeeded.sub(unlockedWant));
         }
 
         // Fetch the unlocked collateral for a second time
         // to update after repaying debt
-        unlockedWant = _unlockedCollateral();
+        unlockedWant = _unlockedWant();
         // if not enough want in balance, it means the strategy lost `want`
         if (_amountNeeded > unlockedWant) {
             _liquidatedAmount = unlockedWant;
@@ -175,9 +189,9 @@ contract Strategy is BaseStrategy {
 
     // ********************** OPERATIONS FUNCTIONS **********************
 
-    function reduceCollateral(uint256 amountToFree) internal {
-        // amountToFree cannot be higher than lockedCollateral
-        amountToFree = Math.min(amountToFree, _lockedCollateral());
+    function reduceLockedCollateral(uint256 amountToFree) internal {
+        // amountToFree cannot be higher than the amount that is unlockable
+        amountToFree = Math.min(amountToFree, _unlockableWant());
 
         if (amountToFree == 0) {
             return;
@@ -202,8 +216,11 @@ contract Strategy is BaseStrategy {
         }
 
         uint256 _debtBalance = balanceOfDebt();
-        require(amountToRepay <= _debtBalance, "!not enough debt to be repaid");
-        // in case the strategy is going to repay almost all debt, it repays the total amount of debt
+        // max amount to be repaid is the total balanceOfDebt
+        amountToRepay = Math.min(_debtBalance, amountToRepay);
+
+        // in case the strategy is going to repay almost all debt, it should repay the total amount of debt
+        // TODO: avoid strategy lock due to trying to repay a greater amount of debt than the amount it can serve
         if (_debtBalance.sub(amountToRepay) <= MIN_ISSUE) {
             amountToRepay = _debtBalance;
         }
@@ -235,7 +252,7 @@ contract Strategy is BaseStrategy {
                 }
 
                 // buy enough sUSD to repay outstanding debt, selling `want` (SNX)
-                if (_unlockedCollateral() > 0) {
+                if (_unlockedWant() > 0) {
                     buySusdWithWant(amountToRepay);
                 }
                 // amountToRepay should equal balanceOfSusd() (we just bought `amountToRepay` sUSD)
@@ -244,20 +261,39 @@ contract Strategy is BaseStrategy {
 
         // repay sUSD debt by burning the synth
         if (amountToRepay > 0) {
-            burnSusd(amountToRepay); // this method is subject to minimumStakePeriod
+            burnSusd(amountToRepay); // this method is subject to minimumStakePeriod (see Synthetix docs)
         }
     }
 
     function claimProfits() internal returns (bool) {
         // two profit sources: Synthetix protocol and Yearn sUSD Vault
-
-        if (estimatedProfit() > 0) {
+        uint256 feesAvailable;
+        uint256 rewardsAvailable;
+        (feesAvailable, rewardsAvailable) = _getFeesAvailable();
+        if (feesAvailable > 0 || rewardsAvailable > 0) {
             // claim fees from Synthetix
             // claim fees (in sUSD) and rewards (in want (SNX))
             // Synthetix protocol requires issuers to have a c-ratio above 500% to be able to claim fees
             // so we need to burn some sUSD
-            burnSusdToTarget();
-            _feePool().claimFees();
+
+            // TODO: check if estimatedProfit is high enough for it to be worth it to go back to 500% and realise losses
+            // jmonteer: first approach: only claim (i.e. burnToTarget) if the amount to repay required debt is less than 30% of cash
+            uint256 _requiredPayment =
+                balanceOfDebt().sub(getTargetDebt(_collateral()));
+            uint256 _maxCash =
+                balanceOfSusd().add(balanceOfSusdInVault()).mul(30).div(100);
+            bool _claim = _requiredPayment > _maxCash ? false : true;
+            if (_claim) {
+                // we need to burn sUSD to target
+                burnSusdToTarget(); // this might not be possible (if debt >> cash to repay)
+
+                // if a vesting entry is going to be created, we save its ID to keep track of its vesting
+                if (rewardsAvailable > 0) {
+                    entryIDs.push(_rewardEscrowV2().nextEntryId());
+                }
+
+                _feePool().claimFees();
+            }
         }
 
         // claim profits from Yearn sUSD Vault
@@ -270,12 +306,39 @@ contract Strategy is BaseStrategy {
                 balanceOfSusdInVault().sub(balanceOfDebt());
             withdrawFromSUSDVault(_valueToWithdraw);
         }
+
         // sell profits in sUSD for want (SNX) using sushiswap
         uint256 _balance = balanceOfSusd();
-
         if (_balance > 0) {
             buyWantWithSusd(_balance);
         }
+    }
+
+    function vestNextRewardsEntry() internal {
+        // Synthetix protocol sends SNX staking rewards to a escrow contract that keeps them 52 weeks, until they vest
+        // each time we claim the SNX rewards, a VestingEntry is created in the escrow contract for the amount that was owed
+        // we need to keep track of those VestingEntries to know when they vest and claim them
+        // after they vest and we claim them, we will receive them in our balance (strategy's balance)
+        if (entryIDs.length == 0) return;
+
+        // The strategy keeps track of the next VestingEntry expected to vest and only when it has vested, it checks the next one
+        // this works because the VestingEntries record has been saved in chronological order and they will vest in chronological order too
+        IRewardEscrowV2 re = _rewardEscrowV2();
+        uint256[] memory nextEntryID;
+        uint256 index = entryIDIndex;
+        nextEntryID[0] = entryIDs[index];
+        uint256 _claimable =
+            re.getVestingEntryClaimable(address(this), nextEntryID[0]);
+        // check if we need to vest
+        if (_claimable == 0) {
+            return;
+        }
+
+        // vest entryID
+        re.vest(nextEntryID);
+
+        // we update the nextEntryID to point to the next VestingEntry
+        entryIDIndex++;
     }
 
     function tendTrigger(uint256 callCost) public view override returns (bool) {
@@ -328,7 +391,7 @@ contract Strategy is BaseStrategy {
         // it burns enough Synths to get back to 500% c-ratio
         // we need to have enough sUSD to burn to target
         uint256 _debtBalance = balanceOfDebt();
-        uint256 _maxSynths = _synthetix().maxIssuableSynths(address(this));
+        uint256 _maxSynths = _synthetix().maxIssuableSynths(address(this)); // returns amount of synths at 500% c-ratio (with current collateral)
         if (_debtBalance <= _maxSynths) {
             // we are over the 500% c-ratio, we don't need to burn sUSD
             return 0;
@@ -397,20 +460,21 @@ contract Strategy is BaseStrategy {
         uint256 availableFees; // in sUSD
         uint256 availableRewards; // in `want` (SNX)
 
-        (availableFees, availableRewards) = _feePool().feesAvailable(
-            address(this)
-        );
+        (availableFees, availableRewards) = _getFeesAvailable();
 
         return availableRewards.add(sUSDToWant(availableFees));
     }
 
-    function getTargetDebt(uint256 _collateral) internal returns (uint256) {
+    function getTargetDebt(uint256 _targetCollateral)
+        internal
+        returns (uint256)
+    {
         uint256 _targetRatio = getTargetRatio();
-        uint256 _collateralInSUSD = wantToSUSD(_collateral);
-        return _targetRatio.mul(_collateralInSUSD);
+        uint256 _collateralInSUSD = wantToSUSD(_targetCollateral);
+        return _targetRatio.mul(_collateralInSUSD).div(1e18);
     }
 
-    function sUSDToWant(uint256 _amount) public view returns (uint256) {
+    function sUSDToWant(uint256 _amount) internal view returns (uint256) {
         if (_amount == 0) {
             return 0;
         }
@@ -418,7 +482,7 @@ contract Strategy is BaseStrategy {
         return _amount.mul(1e18).div(_exchangeRates().rateForCurrency("SNX"));
     }
 
-    function wantToSUSD(uint256 _amount) internal returns (uint256) {
+    function wantToSUSD(uint256 _amount) internal view returns (uint256) {
         if (_amount == 0) {
             return 0;
         }
@@ -427,20 +491,34 @@ contract Strategy is BaseStrategy {
     }
 
     // ********************** BALANCES & RATIOS **********************
-    function _lockedCollateral() public view returns (uint256) {
-        // want (SNX) that is not transferable (to keep max 500% c-ratio)
-        uint256 _debt = balanceOfDebt();
-        // NOTE: issuanceRatio is returned as debt/collateral. This is, 500% c-ratio is 0.2 collateralisationRatio
-        uint256 _collateralRequired =
-            sUSDToWant(_debt.mul(1e18).div(getIssuanceRatio())); // collateral required to keep 500% c-ratio
-
-        uint256 _wantBalance = balanceOfWant();
-        // if the strategy's c-ratio is below 500%, the locked amount is the total SNX balance
-        return Math.min(_wantBalance, _collateralRequired);
+    // TODO: make these functions internal
+    function _lockedCollateral() internal view returns (uint256) {
+        // collateral includes `want` balance (both locked and unlocked) AND escrowed balance
+        uint256 _collateral = _synthetix().collateral(address(this));
+        return _collateral.sub(_unlockedWant());
     }
 
-    function _unlockedCollateral() internal view returns (uint256) {
-        return balanceOfWant().sub(_lockedCollateral());
+    // amount of `want` (SNX) that can be transferred, sold, ...
+    function _unlockedWant() internal view returns (uint256) {
+        return _synthetix().transferableSynthetix(address(this));
+    }
+
+    function _unlockableWant() internal view returns (uint256) {
+        // collateral includes escrowed SNX, we may not be able to unlock the full
+        // we can only unlock this by repaying debt
+        return balanceOfWant().sub(_unlockedWant());
+    }
+
+    function _collateral() internal view returns (uint256) {
+        return _synthetix().collateral(address(this));
+    }
+
+    function _getFeesAvailable() internal view returns (uint256, uint256) {
+        // returns fees and rewards
+        // fees in sUSD
+        // rewards in `want` (SNX)
+
+        return _feePool().feesAvailable(address(this));
     }
 
     function getCurrentRatio() public view returns (uint256) {
@@ -456,6 +534,10 @@ contract Strategy is BaseStrategy {
     function getTargetRatio() public view returns (uint256) {
         return
             _issuer().issuanceRatio().mul(targetRatioMultiplier).div(MAX_BPS);
+    }
+
+    function balanceOfEscrowedWant() public view returns (uint256) {
+        return _rewardEscrowV2().balanceOf(address(this));
     }
 
     function balanceOfWant() public view returns (uint256) {
@@ -481,21 +563,32 @@ contract Strategy is BaseStrategy {
     // ********************** ADDRESS RESOLVER SHORTCUTS **********************
 
     function _synthetix() internal view returns (ISynthetix) {
-        return ISynthetix(IAddressResolver(resolver).getAddress("Synthetix"));
+        return
+            ISynthetix(
+                IAddressResolver(resolver).getAddress(CONTRACT_SYNTHETIX)
+            );
     }
 
     function _feePool() internal view returns (IFeePool) {
-        return IFeePool(IAddressResolver(resolver).getAddress("FeePool"));
+        return
+            IFeePool(IAddressResolver(resolver).getAddress(CONTRACT_FEEPOOL));
     }
 
     function _issuer() internal view returns (IIssuer) {
-        return IIssuer(IAddressResolver(resolver).getAddress("Issuer"));
+        return IIssuer(IAddressResolver(resolver).getAddress(CONTRACT_ISSUER));
     }
 
     function _exchangeRates() internal view returns (IExchangeRates) {
         return
             IExchangeRates(
-                IAddressResolver(resolver).getAddress("ExchangeRates")
+                IAddressResolver(resolver).getAddress(CONTRACT_EXRATES)
+            );
+    }
+
+    function _rewardEscrowV2() internal view returns (IRewardEscrowV2) {
+        return
+            IRewardEscrowV2(
+                IAddressResolver(resolver).getAddress(CONTRACT_REWARDESCROW_V2)
             );
     }
 }
