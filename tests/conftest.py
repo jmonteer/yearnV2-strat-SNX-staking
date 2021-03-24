@@ -1,6 +1,6 @@
 import pytest
-from brownie import config
-from brownie import Contract
+from brownie import config, Contract
+from eth_abi import encode_single
 
 
 @pytest.fixture
@@ -34,9 +34,18 @@ def keeper(accounts):
 
 
 @pytest.fixture
-def token():
-    token_address = "0x6b175474e89094c44da98b954eedeac495271d0f"  # this should be the address of the ERC-20 used by the strategy/vault (DAI)
-    yield Contract(token_address)
+def alice(accounts):
+    yield accounts[6]
+
+
+@pytest.fixture
+def bob(accounts):
+    yield accounts[7]
+
+
+@pytest.fixture
+def token(snx):
+    yield snx
 
 
 @pytest.fixture
@@ -63,18 +72,62 @@ def weth_amout(gov, weth):
 
 
 @pytest.fixture
+def susd():
+    yield Contract("0x57Ab1ec28D129707052df4dF418D58a2D46d5f51")
+
+
+@pytest.fixture
+def snx():
+    yield Contract("0xc011a73ee8576fb46f5e1c5751ca3b9fe0af2a6f")
+
+
+@pytest.fixture
+def susd_whale(accounts):
+    yield accounts.at("0x49BE88F0fcC3A8393a59d3688480d7D253C37D2A", force=True)
+
+
+@pytest.fixture
+def snx_whale(accounts):
+    yield accounts.at("0xA1d7b2d891e3A1f9ef4bBC5be20630C2FEB1c470", force=True)
+
+
+@pytest.fixture
+def snx_oracle(gov, accounts, SnxOracle):
+    exchange_rate = Contract("0xd69b189020EF614796578AfE4d10378c5e7e1138")
+    er_gov = accounts.at(exchange_rate.owner(), force=True)
+    new_oracle = gov.deploy(SnxOracle, "0xd69b189020EF614796578AfE4d10378c5e7e1138")
+    exchange_rate.setOracle(new_oracle, {"from": er_gov})
+
+    # If we don't remove the aggregator prices update through oracle are not considered
+    exchange_rate.removeAggregator(encode_single("bytes32", b"SNX"), {"from": er_gov})
+    exchange_rate.removeAggregator(encode_single("bytes32", b"sBTC"), {"from": er_gov})
+    exchange_rate.removeAggregator(encode_single("bytes32", b"sETH"), {"from": er_gov})
+    yield new_oracle
+
+
+@pytest.fixture
+def susd_vault(accounts):
+    vault = Contract("0xa5cA62D95D24A4a350983D5B8ac4EB8638887396")
+    susd_gov = accounts.at(vault.governance(), force=True)
+    vault.setDepositLimit(2 ** 256 - 1, {"from": susd_gov})
+    yield vault
+
+
+@pytest.fixture
 def vault(pm, gov, rewards, guardian, management, token):
     Vault = pm(config["dependencies"][0]).Vault
     vault = guardian.deploy(Vault)
     vault.initialize(token, gov, rewards, "", "", guardian)
     vault.setDepositLimit(2 ** 256 - 1, {"from": gov})
     vault.setManagement(management, {"from": gov})
+    vault.setPerformanceFee(0, {"from": gov})
+    vault.setManagementFee(0, {"from": gov})
     yield vault
 
 
 @pytest.fixture
-def strategy(strategist, keeper, vault, Strategy, gov):
-    strategy = strategist.deploy(Strategy, vault)
+def strategy(strategist, keeper, vault, Strategy, gov, susd_vault):
+    strategy = strategist.deploy(Strategy, vault, susd_vault)
     strategy.setKeeper(keeper)
-    vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 1_000, {"from": gov})
+    vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
     yield strategy
