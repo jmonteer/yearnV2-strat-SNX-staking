@@ -2,7 +2,6 @@
 pragma solidity 0.6.12;
 pragma experimental ABIEncoderV2;
 
-// These are the core Yearn libraries
 import {BaseStrategy} from "@yearnvaults/contracts/BaseStrategy.sol";
 import {
     SafeERC20,
@@ -27,7 +26,8 @@ contract Strategy is BaseStrategy {
     using Address for address;
     using SafeMath for uint256;
 
-    uint256 public constant MIN_ISSUE = 50 * 1e18; // TODO: update this to avoid constant new issues of synths
+    // TODO: update this to avoid constant new issues of synths
+    uint256 public constant MIN_ISSUE = 50 * 1e18;
     uint256 public constant MAX_RATIO = type(uint256).max;
     uint256 public constant MAX_BPS = 10_000;
 
@@ -48,7 +48,8 @@ contract Strategy is BaseStrategy {
 
     // to keep track of next entry to vest
     uint256 public entryIDIndex = 0;
-    uint256[] public entryIDs; // entryIDs that have been claimed by the strategy
+    // entryIDs of escrow rewards claimed and to be claimed by the Strategy
+    uint256[] public entryIDs;
 
     bytes32 private constant CONTRACT_SYNTHETIX = "Synthetix";
     bytes32 private constant CONTRACT_EXRATES = "ExchangeRates";
@@ -62,9 +63,9 @@ contract Strategy is BaseStrategy {
     {
         susdVault = IVault(_susdVault);
 
-        // To deposit susd in the susd vault
+        // To deposit sUSD in the sUSD vault
         IERC20(susd).safeApprove(address(_susdVault), type(uint256).max);
-        // To exchange sUSD for snx
+        // To exchange sUSD for SNX
         IERC20(susd).safeApprove(address(sushi), type(uint256).max);
         // To exchange SNX for sUSD
         IERC20(want).safeApprove(address(sushi), type(uint256).max);
@@ -152,7 +153,8 @@ contract Strategy is BaseStrategy {
         }
 
         // If there is susd in the strategy, send it to the susd vault
-        if (balanceOfSusd() > 0) {
+        // We do MIN_ISSUE instead of 0 since it might be dust
+        if (balanceOfSusd() > MIN_ISSUE) {
             susdVault.deposit();
         }
     }
@@ -265,29 +267,41 @@ contract Strategy is BaseStrategy {
         }
     }
 
+    // two profit sources: Synthetix protocol and Yearn sUSD Vault
     function claimProfits() internal returns (bool) {
-        // two profit sources: Synthetix protocol and Yearn sUSD Vault
         uint256 feesAvailable;
         uint256 rewardsAvailable;
         (feesAvailable, rewardsAvailable) = _getFeesAvailable();
         if (feesAvailable > 0 || rewardsAvailable > 0) {
             // claim fees from Synthetix
             // claim fees (in sUSD) and rewards (in want (SNX))
-            // Synthetix protocol requires issuers to have a c-ratio above 500% to be able to claim fees
-            // so we need to burn some sUSD
+            // Synthetix protocol requires issuers to have a c-ratio above 500%
+            // to be able to claim fees so we need to burn some sUSD
 
-            // TODO: check if estimatedProfit is high enough for it to be worth it to go back to 500% and realise losses
-            // jmonteer: first approach: only claim (i.e. burnToTarget) if the amount to repay required debt is less than 30% of cash
-            uint256 _requiredPayment =
-                balanceOfDebt().sub(getTargetDebt(_collateral()));
-            uint256 _maxCash =
-                balanceOfSusd().add(balanceOfSusdInVault()).mul(30).div(100);
-            bool _claim = _requiredPayment > _maxCash ? false : true;
-            if (_claim) {
+            uint256 _targetDebt = getTargetDebt(_collateral());
+            uint256 _balanceOfDebt = balanceOfDebt();
+            bool claim = true;
+
+            // TODO: check if estimatedProfit is high enough for it to be worth
+            // it to go back to 500% and realise losses
+            // jmonteer: first approach: only claim (i.e. burnToTarget) if the
+            // amount to repay required debt is less than 30% of cash
+            if (_balanceOfDebt > _targetDebt) {
+                uint256 _requiredPayment = _balanceOfDebt.sub(_targetDebt);
+                uint256 _maxCash =
+                    balanceOfSusd().add(balanceOfSusdInVault()).mul(30).div(
+                        100
+                    );
+                claim = _requiredPayment > _maxCash ? false : true;
+            }
+
+            if (claim) {
                 // we need to burn sUSD to target
-                burnSusdToTarget(); // this might not be possible (if debt >> cash to repay)
+                // this might not be possible (if debt >> cash to repay)
+                burnSusdToTarget();
 
-                // if a vesting entry is going to be created, we save its ID to keep track of its vesting
+                // if a vesting entry is going to be created,
+                // we save its ID to keep track of its vesting
                 if (rewardsAvailable > 0) {
                     entryIDs.push(_rewardEscrowV2().nextEntryId());
                 }
@@ -319,23 +333,25 @@ contract Strategy is BaseStrategy {
         // each time we claim the SNX rewards, a VestingEntry is created in the escrow contract for the amount that was owed
         // we need to keep track of those VestingEntries to know when they vest and claim them
         // after they vest and we claim them, we will receive them in our balance (strategy's balance)
-        if (entryIDs.length == 0) return;
+        if (entryIDs.length == 0) {
+            return;
+        }
 
         // The strategy keeps track of the next VestingEntry expected to vest and only when it has vested, it checks the next one
         // this works because the VestingEntries record has been saved in chronological order and they will vest in chronological order too
         IRewardEscrowV2 re = _rewardEscrowV2();
-        uint256[] memory nextEntryID;
-        uint256 index = entryIDIndex;
-        nextEntryID[0] = entryIDs[index];
+        uint256 nextEntryID = entryIDs[entryIDIndex];
         uint256 _claimable =
-            re.getVestingEntryClaimable(address(this), nextEntryID[0]);
+            re.getVestingEntryClaimable(address(this), nextEntryID);
         // check if we need to vest
         if (_claimable == 0) {
             return;
         }
 
         // vest entryID
-        re.vest(nextEntryID);
+        uint256[] memory params = new uint256[](1);
+        params[0] = nextEntryID;
+        re.vest(params);
 
         // we update the nextEntryID to point to the next VestingEntry
         entryIDIndex++;
@@ -367,11 +383,7 @@ contract Strategy is BaseStrategy {
         view
         override
         returns (address[] memory)
-    {
-        address[] memory protected = new address[](1);
-        protected[0] = susd;
-        return protected;
-    }
+    {}
 
     // ********************** SUPPORT FUNCTIONS  **********************
 
@@ -391,7 +403,8 @@ contract Strategy is BaseStrategy {
         // it burns enough Synths to get back to 500% c-ratio
         // we need to have enough sUSD to burn to target
         uint256 _debtBalance = balanceOfDebt();
-        uint256 _maxSynths = _synthetix().maxIssuableSynths(address(this)); // returns amount of synths at 500% c-ratio (with current collateral)
+        // returns amount of synths at 500% c-ratio (with current collateral)
+        uint256 _maxSynths = _synthetix().maxIssuableSynths(address(this));
         if (_debtBalance <= _maxSynths) {
             // we are over the 500% c-ratio, we don't need to burn sUSD
             return 0;
@@ -491,10 +504,10 @@ contract Strategy is BaseStrategy {
     }
 
     // ********************** BALANCES & RATIOS **********************
-    // TODO: make these functions internal
     function _lockedCollateral() internal view returns (uint256) {
         // collateral includes `want` balance (both locked and unlocked) AND escrowed balance
         uint256 _collateral = _synthetix().collateral(address(this));
+        // REVIEW: I don't understand why sub _unlockedWant :(
         return _collateral.sub(_unlockedWant());
     }
 
@@ -513,11 +526,10 @@ contract Strategy is BaseStrategy {
         return _synthetix().collateral(address(this));
     }
 
+    // returns fees and rewards
     function _getFeesAvailable() internal view returns (uint256, uint256) {
-        // returns fees and rewards
         // fees in sUSD
         // rewards in `want` (SNX)
-
         return _feePool().feesAvailable(address(this));
     }
 
@@ -558,6 +570,10 @@ contract Strategy is BaseStrategy {
                 .balanceOf(address(this))
                 .mul(susdVault.pricePerShare())
                 .div(1e18);
+    }
+
+    function balanceOfUnlockedWant() public view returns (uint256) {
+        return _synthetix().transferableSynthetix(address(this));
     }
 
     // ********************** ADDRESS RESOLVER SHORTCUTS **********************
