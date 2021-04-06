@@ -3,7 +3,7 @@ from brownie import Wei, Contract
 from eth_abi import encode_single
 
 
-def test_revoke(
+def test_emergency_exit(
     chain,
     gov,
     vault,
@@ -41,31 +41,9 @@ def test_revoke(
     chain.sleep(86401)
     chain.mine(1)
 
-    # Donate some sUSD to the susd_vault to mock earnings and harvest profit
-    susd.transfer(susd_vault, Wei("1000 ether"), {"from": susd_whale})
-    strategy.harvest({"from": gov})
-    assert vault.strategies(strategy).dict()["totalGain"] > 0
-
-    # Sleep 8 hours to get the full profit
-    chain.sleep(60 * 60 * 8)
-    chain.mine(1)
-
-    # Sleep 24 hours to allow the minimumStakePeriod to pass
-    chain.sleep(60 * 60 * 24)
-    chain.mine(1)
-
-    # Revoke + harvest
-    vault.revokeStrategy(strategy, {"from": gov})
+    strategy.setEmergencyExit({"from": gov})
     strategy.harvest({"from": gov})
 
-    assert strategy.balanceOfWant() == 0
-    assert strategy.balanceOfDebt() == 0
-    assert strategy.balanceOfSusdInVault() == 0
-    # There might be some dust from the susd price per share calculations
-    assert strategy.balanceOfSusd() < Wei("0.1 ether")
+    assert strategy.estimatedTotalAssets() == 0
+    assert snx.balanceOf(vault) == Wei("1000 ether")
     assert vault.strategies(strategy).dict()["totalDebt"] == 0
-    assert vault.strategies(strategy).dict()["debtRatio"] == 0
-    assert (
-        snx.balanceOf(vault)
-        == Wei("1000 ether") + vault.strategies(strategy).dict()["totalGain"]
-    )

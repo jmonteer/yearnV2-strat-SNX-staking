@@ -57,7 +57,8 @@ def test_happy_path(
     with brownie.reverts():
         vault.withdraw({"from": bob})
 
-    chain.sleep(60 * 60 * 24)  # Sleep 24 hours to allow the minimumStakePeriod to pass
+    # Sleep 24 hours to allow the minimumStakePeriod to pass
+    chain.sleep(60 * 60 * 24)
     chain.mine(1)
 
     tx = vault.withdraw({"from": bob})
