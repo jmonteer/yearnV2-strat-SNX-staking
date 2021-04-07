@@ -76,6 +76,7 @@ def test_liquidations_snx_price_change(
     )  # the losses where correctly calculated
     chain.revert()
 
+
 def test_liquidations_debt_changes(
     snx,
     chain,

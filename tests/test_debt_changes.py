@@ -109,6 +109,7 @@ def test_debt_increases(
     assert snx.balanceOf(bob) < Wei("1000 ether")
     chain.revert()
 
+
 def test_debt_decreases(
     snx,
     chain,

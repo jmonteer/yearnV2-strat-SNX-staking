@@ -17,7 +17,7 @@ def test_migration(
     # Deposit to the vault and harvest
     token.approve(vault, amount, {"from": gov})
     vault.deposit(amount, {"from": gov})
-    strategy.harvest({'from': gov})
+    strategy.harvest({"from": gov})
     assert token.balanceOf(strategy) == amount
 
     # sleep for 24h to be able to burn synths
