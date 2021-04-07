@@ -89,14 +89,17 @@ def susd_whale(accounts):
 def snx_whale(accounts):
     yield accounts.at("0xA1d7b2d891e3A1f9ef4bBC5be20630C2FEB1c470", force=True)
 
+
 @pytest.fixture
 def resolver(accounts):
     yield Contract("0x823bE81bbF96BEc0e25CA13170F5AaCb5B79ba83")
+
 
 @pytest.fixture
 def issuer(accounts, resolver):
     address = resolver.getAddress(encode_single("bytes32", b"Issuer"))
     yield Contract(address)
+
 
 @pytest.fixture
 def snx_oracle(gov, accounts, SnxOracle, issuer):
@@ -115,17 +118,26 @@ def snx_oracle(gov, accounts, SnxOracle, issuer):
     #     e_symbol = issuer.synthsByAddress(addy)
     #     if e_symbol.hex() in encoded_symbols:
     #         print(i, addy)
-    #     else: 
+    #     else:
     #         print("removing", addy, e_symbol)
     #         issuer.removeSynth(e_symbol, {'from': er_gov})
 
-    if(exchange_rate.aggregators(encode_single("bytes32", b"SNX")) == "0x0000000000000000000000000000000000000000"):
+    if (
+        exchange_rate.aggregators(encode_single("bytes32", b"SNX"))
+        == "0x0000000000000000000000000000000000000000"
+    ):
         yield new_oracle
     else:
         # If we don't remove the aggregator prices update through oracle are not considered
-        exchange_rate.removeAggregator(encode_single("bytes32", b"SNX"), {"from": er_gov})
-        exchange_rate.removeAggregator(encode_single("bytes32", b"sBTC"), {"from": er_gov})
-        exchange_rate.removeAggregator(encode_single("bytes32", b"sETH"), {"from": er_gov})
+        exchange_rate.removeAggregator(
+            encode_single("bytes32", b"SNX"), {"from": er_gov}
+        )
+        exchange_rate.removeAggregator(
+            encode_single("bytes32", b"sBTC"), {"from": er_gov}
+        )
+        exchange_rate.removeAggregator(
+            encode_single("bytes32", b"sETH"), {"from": er_gov}
+        )
         yield new_oracle
 
 

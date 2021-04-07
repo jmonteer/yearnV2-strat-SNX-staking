@@ -52,7 +52,7 @@ def test_happy_path(
     susd.transfer(susd_vault, Wei("1000 ether"), {"from": susd_whale})
     strategy.harvest({"from": gov})
     assert vault.strategies(strategy).dict()["totalGain"] > 0
-    
+
     # Sleep 24 hours to allow the minimumStakePeriod to pass
     chain.sleep(60 * 60 * 24)
     chain.mine(1)
