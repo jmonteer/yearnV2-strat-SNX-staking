@@ -20,13 +20,14 @@ def test_migrate_investment_vault(
     rewards,
     management,
 ):
-    # Move stale period to 6 days
+    chain.snapshot()
+    # Move stale period to 16 days
     resolver = Contract(strategy.resolver())
     settings = Contract(
         resolver.getAddress(encode_single("bytes32", b"SystemSettings"))
     )
-    settings.setRateStalePeriod(24 * 3600 * 6, {"from": settings.owner()})
-    settings.setDebtSnapshotStaleTime(24 * 3600 * 6, {"from": settings.owner()})
+    settings.setRateStalePeriod(24 * 3600 * 16, {"from": settings.owner()})
+    settings.setDebtSnapshotStaleTime(24 * 3600 * 16, {"from": settings.owner()})
 
     snx.transfer(bob, Wei("1000 ether"), {"from": snx_whale})
     snx.approve(vault, 2 ** 256 - 1, {"from": bob})
@@ -63,3 +64,4 @@ def test_migrate_investment_vault(
     assert snx.balanceOf(vault) == 0
     assert vault.balanceOf(bob) == 0
     assert snx.balanceOf(bob) == Wei("1000 ether")
+    chain.revert()

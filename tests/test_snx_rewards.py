@@ -15,6 +15,7 @@ def test_snx_rewards(
     bob,
     snx_oracle,
 ):
+    chain.snapshot()
     # Move stale period to 30 days
     resolver = Contract(strategy.resolver())
     settings = Contract(
@@ -50,20 +51,16 @@ def test_snx_rewards(
     chain.sleep(60 * 60 * 8)  # Sleep 8 hours
     chain.mine(1)
 
-    # After a second harvest we should get fees from trades which means profit
-    assert vault.strategies(strategy).dict()["totalGain"] > 0
-
     strategy.harvest({"from": gov})
+    chain.sleep(60 * 60 * 24 * 7)  # Sleep 7 days
+    chain.mine(1)
 
-    # Since we got snx rewards, we have more collateral, hence more susd should be issue
+    # Since we got snx rewards, we have more collateral, hence more susd should be issued
     assert strategy.balanceOfDebt() > initial_debt
-
-    # test vesting rewards
-    chain.sleep(366 * 24 * 3600)  # a bit over 1 year
-    chain.mine()
 
     previous_snx_balance = snx.balanceOf(vault)
 
     strategy.harvest({"from": gov})
 
     assert previous_snx_balance < snx.balanceOf(vault)
+    chain.revert()

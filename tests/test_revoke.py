@@ -16,6 +16,7 @@ def test_revoke(
     bob,
     snx_oracle,
 ):
+    chain.snapshot()
     # Move stale period to 6 days
     resolver = Contract(strategy.resolver())
     settings = Contract(
@@ -69,3 +70,4 @@ def test_revoke(
         snx.balanceOf(vault)
         == Wei("1000 ether") + vault.strategies(strategy).dict()["totalGain"]
     )
+    chain.revert()

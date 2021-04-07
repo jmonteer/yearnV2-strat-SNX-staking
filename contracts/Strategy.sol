@@ -86,15 +86,20 @@ contract Strategy is BaseStrategy {
 
     function setRatioThreshold(uint256 _ratioThreshold)
         external
-        onlyGovernance
+        onlyStrategist
     {
         ratioThreshold = _ratioThreshold;
     }
 
     // This method is used to migrate the vault where we deposit the sUSD for yield. It should be rarely used
     function migrateSusdVault(IVault newSusdVault) external onlyGovernance {
-        // TODO: should we tolerate losses just in case?
-        susdVault.withdraw();
+        // we tolerate losses to avoid being locked in the vault if things don't work out
+        // governance must take this into account before migrating
+        susdVault.withdraw(
+            susdVault.balanceOf(address(this)),
+            address(this),
+            10_000
+        );
         IERC20(susd).safeApprove(address(susdVault), 0);
 
         susdVault = newSusdVault;
@@ -178,7 +183,7 @@ contract Strategy is BaseStrategy {
             // NOTE: min threshold to act on differences = 1e16 (ratioThreshold)
             // if there is enough collateral to issue Synth, issue it
             // this should put the c-ratio around 500% (i.e. debt ratio around 20%)
-            _synthetix().issueMaxSynths();
+            if (balanceOfWant() > 0) _synthetix().issueMaxSynths();
         }
 
         // If there is susd in the strategy, send it to the susd vault

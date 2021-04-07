@@ -5,6 +5,7 @@ from eth_abi import encode_single
 def test_migration(
     token, vault, strategy, amount, Strategy, strategist, gov, susd_vault, chain
 ):
+    chain.snapshot()
     # Move stale period to 6 days
     resolver = Contract(strategy.resolver())
     settings = Contract(
@@ -16,7 +17,7 @@ def test_migration(
     # Deposit to the vault and harvest
     token.approve(vault, amount, {"from": gov})
     vault.deposit(amount, {"from": gov})
-    strategy.harvest()
+    strategy.harvest({'from': gov})
     assert token.balanceOf(strategy) == amount
 
     # sleep for 24h to be able to burn synths
@@ -27,3 +28,4 @@ def test_migration(
     new_strategy = strategist.deploy(Strategy, vault, susd_vault)
     strategy.migrate(new_strategy, {"from": gov})
     assert token.balanceOf(new_strategy) == amount
+    chain.revert()
