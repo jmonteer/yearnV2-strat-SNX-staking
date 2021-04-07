@@ -28,7 +28,7 @@ contract Strategy is BaseStrategy {
 
     // TODO: update this to avoid constant new issues of synths
     uint256 public constant MIN_ISSUE = 50 * 1e18;
-    uint256 public constant RATIO_THRESHOLD = 1e16;
+    uint256 public constant RATIO_THRESHOLD = 1e15;
     uint256 public constant MAX_RATIO = type(uint256).max;
     uint256 public constant MAX_BPS = 10_000;
 
@@ -44,8 +44,8 @@ contract Strategy is BaseStrategy {
     ISushiRouter public constant sushi =
         ISushiRouter(address(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D));
 
-    uint256 public targetRatioMultiplier = 15_000;
-    IVault public immutable susdVault;
+    uint256 public targetRatioMultiplier = 12_500;
+    IVault public susdVault;
 
     // to keep track of next entry to vest
     uint256 public entryIDIndex = 0;
@@ -78,6 +78,15 @@ contract Strategy is BaseStrategy {
         onlyGovernance
     {
         targetRatioMultiplier = _targetRatioMultiplier;
+    }
+
+    function migrateSusdVault(IVault _sUSDVault) external onlyGovernance {
+        uint256 _balanceToWithdraw = balanceOfSusdInVault();
+        withdrawFromSUSDVault(_balanceToWithdraw);
+        IERC20(susd).safeApprove(address(susdVault), 0);
+        susdVault = _sUSDVault;
+        IERC20(susd).safeApprove(address(_sUSDVault), type(uint256).max);
+        _sUSDVault.deposit();
     }
 
     // ********************** YEARN STRATEGY **********************
@@ -149,7 +158,10 @@ contract Strategy is BaseStrategy {
             uint256 _debtToRepay =
                 balanceOfDebt().sub(getTargetDebt(_collateral()));
             repayDebt(_debtToRepay);
-        } else if (_issuanceRatio.sub(_currentRatio) >= RATIO_THRESHOLD) {
+        } else if (
+            _issuanceRatio > _currentRatio &&
+            _issuanceRatio.sub(_currentRatio) >= RATIO_THRESHOLD
+        ) {
             // NOTE: min threshold to act on differences = 1e16 (RATIO_THRESHOLD)
             // if there is enough collateral to issue Synth, issue it
             // this should put the c-ratio around 500% (i.e. debt ratio around 20%)
@@ -220,13 +232,16 @@ contract Strategy is BaseStrategy {
         if (amountToRepay == 0) {
             return;
         }
-
+        uint256 repaidAmount = 0;
         uint256 _debtBalance = balanceOfDebt();
         // max amount to be repaid is the total balanceOfDebt
         amountToRepay = Math.min(_debtBalance, amountToRepay);
 
         // in case the strategy is going to repay almost all debt, it should repay the total amount of debt
-        if (_debtBalance.sub(amountToRepay) <= MIN_ISSUE) {
+        if (
+            _debtBalance > amountToRepay &&
+            _debtBalance.sub(amountToRepay) <= MIN_ISSUE
+        ) {
             amountToRepay = _debtBalance;
         }
 
@@ -252,7 +267,7 @@ contract Strategy is BaseStrategy {
                     if (burnSusd(currentSusdBalance)) {
                         // subject to minimumStakePeriod
                         // if successful burnt, update remaining amountToRepay
-                        amountToRepay = amountToRepay.sub(currentSusdBalance);
+                        repaidAmount = repaidAmount.add(currentSusdBalance);
                     }
                 }
 
@@ -266,10 +281,14 @@ contract Strategy is BaseStrategy {
         }
 
         // repay sUSD debt by burning the synth
-        if (amountToRepay > 0) {
-            burnSusd(amountToRepay); // this method is subject to minimumStakePeriod (see Synthetix docs)
+        if (amountToRepay > repaidAmount) {
+            burnSusd(amountToRepay.sub(repaidAmount)); // this method is subject to minimumStakePeriod (see Synthetix docs)
+            repaidAmount = amountToRepay;
         }
+        emit RepayDebt(repaidAmount);
     }
+
+    event RepayDebt(uint256 repaidAmount);
 
     // two profit sources: Synthetix protocol and Yearn sUSD Vault
     function claimProfits() internal returns (bool) {

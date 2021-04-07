@@ -23,10 +23,7 @@ def test_happy_path(
     )
     settings.setRateStalePeriod(24 * 3600 * 6, {"from": settings.owner()})
     settings.setDebtSnapshotStaleTime(24 * 3600 * 6, {"from": settings.owner()})
-    # debtCache = Contract(resolver.getAddress(encode_single('bytes32', b'DebtCache')))
-    # snx_oracle.updateBTCPrice(Wei('70000 ether'), {'from': gov})
-    # snx_oracle.updateETHPrice(Wei('2000 ether'), {'from': gov})
-    # debtCache.takeDebtSnapshot({"from": debtCache.owner()})
+
     # Do the first deposit
     snx.transfer(bob, Wei("1000 ether"), {"from": snx_whale})
     snx.approve(vault, 2 ** 256 - 1, {"from": bob})
@@ -38,6 +35,10 @@ def test_happy_path(
     assert strategy.balanceOfWant() == Wei("1000 ether")
     assert strategy.balanceOfSusd() == 0
     assert strategy.balanceOfSusdInVault() > 0
+
+    # should not allow to withdraw before minimumStakePeriod ends
+    with brownie.reverts():
+        vault.withdraw({"from": bob})
 
     # We need to wait 24hs to be able to burn synths
     # Always takeDebtSnapshot after moving time.
@@ -51,12 +52,7 @@ def test_happy_path(
     susd.transfer(susd_vault, Wei("1000 ether"), {"from": susd_whale})
     strategy.harvest({"from": gov})
     assert vault.strategies(strategy).dict()["totalGain"] > 0
-
-    chain.sleep(60 * 60 * 8)  # Sleep 8 hours
-    chain.mine(1)
-    with brownie.reverts():
-        vault.withdraw({"from": bob})
-
+    
     # Sleep 24 hours to allow the minimumStakePeriod to pass
     chain.sleep(60 * 60 * 24)
     chain.mine(1)
