@@ -50,7 +50,9 @@ def test_debt_increases(
         print("Taking Debt Snapshot, this will take a while...")
         debtCache.takeDebtSnapshot({"from": debtCache.owner()})
     except:
-        print("cached, failed debtSnashot but dont worry")
+        print(
+            "Failed. This is expected due to timeout but it is useful to cache, next call will go through"
+        )
 
     snx_oracle.updateBTCPrice(Wei("70000 ether"), {"from": gov})
     snx_oracle.updateETHPrice(Wei("2500 ether"), {"from": gov})
