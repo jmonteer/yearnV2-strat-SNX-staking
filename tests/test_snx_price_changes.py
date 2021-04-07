@@ -2,6 +2,7 @@ import brownie
 from brownie import Wei, Contract
 from eth_abi import encode_single
 
+
 def test_snx_price_decreases(
     snx,
     chain,

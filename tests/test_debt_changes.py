@@ -40,7 +40,6 @@ def test_debt_increases(
     assert strategy.balanceOfSusd() == 0
     assert strategy.balanceOfSusdInVault() > 0
 
-
     # debt pool value increases (main assets are ETH and WBTC so increasing its price increases debt pool value)
     debtCache = Contract(resolver.getAddress(encode_single("bytes32", b"DebtCache")))
 
@@ -49,7 +48,9 @@ def test_debt_increases(
         print("Taking Debt Snapshot, this will take a while...")
         debtCache.takeDebtSnapshot({"from": debtCache.owner()})
     except:
-        print("Failed. This is expected due to timeout but it is useful to cache, next call will go through")
+        print(
+            "Failed. This is expected due to timeout but it is useful to cache, next call will go through"
+        )
 
     previous_debt = strategy.balanceOfDebt()
 
@@ -195,5 +196,3 @@ def test_debt_decreases(
     # bob earned SNX
     assert snx.balanceOf(bob) > Wei("1000 ether")
     chain.revert()
-
-

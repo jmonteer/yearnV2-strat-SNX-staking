@@ -2,6 +2,7 @@ import brownie
 from brownie import Wei, Contract
 from eth_abi import encode_single
 
+
 def test_liquidations_snx_price_change(
     snx,
     chain,
@@ -13,7 +14,8 @@ def test_liquidations_snx_price_change(
     susd_whale,
     snx_whale,
     bob,
-    snx_oracle,):
+    snx_oracle,
+):
 
     chain.snapshot()
     # Move stale period to 6 days
@@ -44,29 +46,36 @@ def test_liquidations_snx_price_change(
     snx_oracle.updateSnxPrice(Wei("7 ether"), {"from": gov})
 
     # the strategy can now be liquidated
-    synthetix = Contract(
-        resolver.getAddress(encode_single("bytes32", b"Synthetix"))
-    )
+    synthetix = Contract(resolver.getAddress(encode_single("bytes32", b"Synthetix")))
     liquidations = Contract(
         resolver.getAddress(encode_single("bytes32", b"Liquidations"))
     )
-    # flag account for liquidation, then wait three days to allow the account to repay 
-    liquidations.flagAccountForLiquidation(strategy, {'from': snx_whale})
-    chain.sleep(3600 * 24 * 3 + 1) # a bit over 3 days (see Synthetix docs)
+    # flag account for liquidation, then wait three days to allow the account to repay
+    liquidations.flagAccountForLiquidation(strategy, {"from": snx_whale})
+    chain.sleep(3600 * 24 * 3 + 1)  # a bit over 3 days (see Synthetix docs)
     chain.mine()
-    
+
     # repay debt
-    amount_needed = liquidations.calculateAmountToFixCollateral(strategy.balanceOfDebt(), strategy.balanceOfWant()*7)
+    amount_needed = liquidations.calculateAmountToFixCollateral(
+        strategy.balanceOfDebt(), strategy.balanceOfWant() * 7
+    )
     previous_whale_balance = snx.balanceOf(susd_whale)
-    synthetix.liquidateDelinquentAccount(strategy, amount_needed, {'from': susd_whale})
+    synthetix.liquidateDelinquentAccount(strategy, amount_needed, {"from": susd_whale})
 
     assert strategy.getCurrentRatio() == strategy.getIssuanceRatio()
 
     vault.withdraw(vault.balanceOf(bob), bob, 10_000, {"from": bob})
 
     assert snx.balanceOf(bob) < Wei("1000 ether")
-    assert previous_whale_balance < snx.balanceOf(susd_whale) # the whale receives SNX (debt paid + 10%) as reward for liquidating
-    assert amount_needed  * 11 / 70 * 0.999  < Wei("1000 ether") - snx.balanceOf(bob) < amount_needed  * 11 / 70 * 1.001 # the losses where correctly calculated
+    assert previous_whale_balance < snx.balanceOf(
+        susd_whale
+    )  # the whale receives SNX (debt paid + 10%) as reward for liquidating
+    assert (
+        amount_needed * 11 / 70 * 0.999
+        < Wei("1000 ether") - snx.balanceOf(bob)
+        < amount_needed * 11 / 70 * 1.001
+    )  # the losses where correctly calculated
+
 
 def test_liquidations_debt_changes(
     snx,
@@ -79,7 +88,8 @@ def test_liquidations_debt_changes(
     susd_whale,
     snx_whale,
     bob,
-    snx_oracle,):
+    snx_oracle,
+):
     chain.snapshot()
     # Move stale period to 16 days
     resolver = Contract(strategy.resolver())
@@ -112,8 +122,9 @@ def test_liquidations_debt_changes(
         print("Taking Debt Snapshot, this will take a while...")
         debtCache.takeDebtSnapshot({"from": debtCache.owner()})
     except:
-        print("Failed. This is expected due to timeout but it is useful to cache, next call will go through")
-
+        print(
+            "Failed. This is expected due to timeout but it is useful to cache, next call will go through"
+        )
 
     # debt pool goes up to the sky
     previous_debt = strategy.balanceOfDebt()
@@ -125,28 +136,34 @@ def test_liquidations_debt_changes(
     # check that our debt has increased when debt pool value has increased
     assert strategy.balanceOfDebt() > previous_debt
     # the strategy can now be liquidated
-    synthetix = Contract(
-        resolver.getAddress(encode_single("bytes32", b"Synthetix"))
-    )
+    synthetix = Contract(resolver.getAddress(encode_single("bytes32", b"Synthetix")))
     liquidations = Contract(
         resolver.getAddress(encode_single("bytes32", b"Liquidations"))
     )
-    # flag account for liquidation, then wait three days to allow the account to repay 
-    liquidations.flagAccountForLiquidation(strategy, {'from': snx_whale})
-    chain.sleep(3600 * 24 * 3 + 1) # a bit over 3 days (see Synthetix docs)
+    # flag account for liquidation, then wait three days to allow the account to repay
+    liquidations.flagAccountForLiquidation(strategy, {"from": snx_whale})
+    chain.sleep(3600 * 24 * 3 + 1)  # a bit over 3 days (see Synthetix docs)
     chain.mine()
-    
+
     # repay debt
-    amount_needed = liquidations.calculateAmountToFixCollateral(strategy.balanceOfDebt(), strategy.balanceOfWant()*20)
+    amount_needed = liquidations.calculateAmountToFixCollateral(
+        strategy.balanceOfDebt(), strategy.balanceOfWant() * 20
+    )
     previous_whale_balance = snx.balanceOf(susd_whale)
-    synthetix.liquidateDelinquentAccount(strategy, amount_needed, {'from': susd_whale})
+    synthetix.liquidateDelinquentAccount(strategy, amount_needed, {"from": susd_whale})
 
     assert strategy.getCurrentRatio() == strategy.getIssuanceRatio()
 
     vault.withdraw(vault.balanceOf(bob), bob, 10_000, {"from": bob})
 
     assert snx.balanceOf(bob) < Wei("1000 ether")
-    assert previous_whale_balance < snx.balanceOf(susd_whale) # the whale receives SNX (debt paid + 10%) as reward for liquidating
-    assert amount_needed  * 11 / 70 * 0.999  < Wei("1000 ether") - snx.balanceOf(bob) < amount_needed  * 11 / 70 * 1.001 # the losses where correctly calculated
+    assert previous_whale_balance < snx.balanceOf(
+        susd_whale
+    )  # the whale receives SNX (debt paid + 10%) as reward for liquidating
+    assert (
+        amount_needed * 11 / 70 * 0.999
+        < Wei("1000 ether") - snx.balanceOf(bob)
+        < amount_needed * 11 / 70 * 1.001
+    )  # the losses where correctly calculated
 
     chain.revert()
