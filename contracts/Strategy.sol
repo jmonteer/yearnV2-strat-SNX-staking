@@ -64,6 +64,9 @@ contract Strategy is BaseStrategy {
     {
         susdVault = IVault(_susdVault);
 
+        // max time between harvest to collect rewards from each epoch
+        maxReportDelay = 7 * 24 * 3600;
+
         // To deposit sUSD in the sUSD vault
         IERC20(susd).safeApprove(address(_susdVault), type(uint256).max);
         // To exchange sUSD for SNX
@@ -80,13 +83,15 @@ contract Strategy is BaseStrategy {
         targetRatioMultiplier = _targetRatioMultiplier;
     }
 
-    function migrateSusdVault(IVault _sUSDVault) external onlyGovernance {
+    // This method is used to migrate the vault where we deposit the sUSD for yield. It should be rarely used
+    function migrateSusdVault(IVault newSusdVault) external onlyGovernance {
         uint256 _balanceToWithdraw = balanceOfSusdInVault();
         withdrawFromSUSDVault(_balanceToWithdraw);
         IERC20(susd).safeApprove(address(susdVault), 0);
-        susdVault = _sUSDVault;
-        IERC20(susd).safeApprove(address(_sUSDVault), type(uint256).max);
-        _sUSDVault.deposit();
+
+        susdVault = newSusdVault;
+        IERC20(susd).safeApprove(address(newSusdVault), type(uint256).max);
+        newSusdVault.deposit();
     }
 
     // ********************** YEARN STRATEGY **********************

@@ -2,7 +2,6 @@ import brownie
 from brownie import Wei, Contract
 from eth_abi import encode_single
 
-
 def test_snx_price_decreases(
     snx,
     chain,
@@ -22,8 +21,8 @@ def test_snx_price_decreases(
     settings = Contract(
         resolver.getAddress(encode_single("bytes32", b"SystemSettings"))
     )
-    settings.setRateStalePeriod(24 * 3600 * 6, {"from": settings.owner()})
-    settings.setDebtSnapshotStaleTime(24 * 3600 * 6, {"from": settings.owner()})
+    settings.setRateStalePeriod(24 * 3600 * 16, {"from": settings.owner()})
+    settings.setDebtSnapshotStaleTime(24 * 3600 * 16, {"from": settings.owner()})
 
     snx.transfer(bob, Wei("1000 ether"), {"from": snx_whale})
     snx.approve(vault, 2 ** 256 - 1, {"from": bob})

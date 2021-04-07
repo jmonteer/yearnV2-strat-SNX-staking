@@ -1,7 +1,6 @@
 from brownie import Wei, Contract
 from eth_abi import encode_single
 
-
 def test_snx_rewards(
     chain,
     gov,

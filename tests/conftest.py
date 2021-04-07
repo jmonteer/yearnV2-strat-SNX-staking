@@ -108,20 +108,6 @@ def snx_oracle(gov, accounts, SnxOracle, issuer):
     new_oracle = gov.deploy(SnxOracle, "0xd69b189020EF614796578AfE4d10378c5e7e1138")
     exchange_rate.setOracle(new_oracle, {"from": er_gov})
 
-    # accepted_synths = ["0xfE18be6b3Bd88A2D2A7f928d00292E7a9963CfC6", "0x5e74C9036fb86BD7eCdcb084a0673EFc32eA31cb", "0x57Ab1ec28D129707052df4dF418D58a2D46d5f51"]
-    # symbols = [b"sBTC", b"sETH", b"sUSD"]
-    # encoded_symbols = [encode_single("bytes32", x).hex() for x in symbols]
-    # print("accepted", encoded_symbols)
-    # count = issuer.availableSynthCount()
-    # for i in range(0, count):
-    #     addy = issuer.availableSynths(i)
-    #     e_symbol = issuer.synthsByAddress(addy)
-    #     if e_symbol.hex() in encoded_symbols:
-    #         print(i, addy)
-    #     else:
-    #         print("removing", addy, e_symbol)
-    #         issuer.removeSynth(e_symbol, {'from': er_gov})
-
     if (
         exchange_rate.aggregators(encode_single("bytes32", b"SNX"))
         == "0x0000000000000000000000000000000000000000"
