@@ -55,16 +55,15 @@ def test_snx_rewards(
 
     strategy.harvest({"from": gov})
 
-
     # Since we got snx rewards, we have more collateral, hence more susd should be issue
     assert strategy.balanceOfDebt() > initial_debt
 
     # test vesting rewards
-    chain.sleep(366 * 24 * 3600) # a bit over 1 year
+    chain.sleep(366 * 24 * 3600)  # a bit over 1 year
     chain.mine()
 
     previous_snx_balance = snx.balanceOf(vault)
 
-    strategy.harvest({'from': gov})
+    strategy.harvest({"from": gov})
 
     assert previous_snx_balance < snx.balanceOf(vault)
