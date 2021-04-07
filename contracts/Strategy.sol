@@ -28,7 +28,8 @@ contract Strategy is BaseStrategy {
 
     // TODO: update this to avoid constant new issues of synths
     uint256 public constant MIN_ISSUE = 50 * 1e18;
-    uint256 public constant RATIO_THRESHOLD = 1e15;
+    // TODO: convert this to constant
+    uint256 public ratioThreshold = 1e15;
     uint256 public constant MAX_RATIO = type(uint256).max;
     uint256 public constant MAX_BPS = 10_000;
 
@@ -83,10 +84,17 @@ contract Strategy is BaseStrategy {
         targetRatioMultiplier = _targetRatioMultiplier;
     }
 
+    function setRatioThreshold(uint256 _ratioThreshold)
+        external
+        onlyGovernance
+    {
+        ratioThreshold = _ratioThreshold;
+    }
+
     // This method is used to migrate the vault where we deposit the sUSD for yield. It should be rarely used
     function migrateSusdVault(IVault newSusdVault) external onlyGovernance {
-        uint256 _balanceToWithdraw = balanceOfSusdInVault();
-        withdrawFromSUSDVault(_balanceToWithdraw);
+        // TODO: should we tolerate losses just in case?
+        susdVault.withdraw();
         IERC20(susd).safeApprove(address(susdVault), 0);
 
         susdVault = newSusdVault;
@@ -155,9 +163,9 @@ contract Strategy is BaseStrategy {
 
         if (
             _currentRatio > _targetRatio &&
-            _currentRatio.sub(_targetRatio) >= RATIO_THRESHOLD
+            _currentRatio.sub(_targetRatio) >= ratioThreshold
         ) {
-            // NOTE: min threshold to act on differences = 1e16 (RATIO_THRESHOLD)
+            // NOTE: min threshold to act on differences = 1e16 (ratioThreshold)
             // current debt ratio might be unhealthy
             // we need to repay some debt to get back to the optimal range
             uint256 _debtToRepay =
@@ -165,9 +173,9 @@ contract Strategy is BaseStrategy {
             repayDebt(_debtToRepay);
         } else if (
             _issuanceRatio > _currentRatio &&
-            _issuanceRatio.sub(_currentRatio) >= RATIO_THRESHOLD
+            _issuanceRatio.sub(_currentRatio) >= ratioThreshold
         ) {
-            // NOTE: min threshold to act on differences = 1e16 (RATIO_THRESHOLD)
+            // NOTE: min threshold to act on differences = 1e16 (ratioThreshold)
             // if there is enough collateral to issue Synth, issue it
             // this should put the c-ratio around 500% (i.e. debt ratio around 20%)
             _synthetix().issueMaxSynths();
@@ -392,14 +400,14 @@ contract Strategy is BaseStrategy {
         if (_currentRatio < _issuanceRatio) {
             // strategy needs to take more debt
             // only return true if the difference is greater than a threshold
-            return _issuanceRatio.sub(_currentRatio) >= RATIO_THRESHOLD;
+            return _issuanceRatio.sub(_currentRatio) >= ratioThreshold;
         } else if (_currentRatio <= _targetRatio) {
             // strategy is in optimal range (a bit undercollateralised)
             return false;
         } else if (_currentRatio > _targetRatio) {
             // the strategy needs to repay debt to exit the danger zone
             // only return true if the difference is greater than a threshold
-            return _currentRatio.sub(_targetRatio) >= RATIO_THRESHOLD;
+            return _currentRatio.sub(_targetRatio) >= ratioThreshold;
         }
 
         return false;

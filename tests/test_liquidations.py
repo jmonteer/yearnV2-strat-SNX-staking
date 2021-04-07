@@ -129,8 +129,8 @@ def test_liquidations_debt_changes(
     # debt pool goes up to the sky
     previous_debt = strategy.balanceOfDebt()
 
-    snx_oracle.updateBTCPrice(Wei("200000 ether"), {"from": gov})
-    snx_oracle.updateETHPrice(Wei("7000 ether"), {"from": gov})
+    snx_oracle.updateBTCPrice(Wei("250000 ether"), {"from": gov})
+    snx_oracle.updateETHPrice(Wei("10000 ether"), {"from": gov})
     debtCache.takeDebtSnapshot({"from": debtCache.owner()})
     print("debt", strategy.balanceOfDebt())
     # check that our debt has increased when debt pool value has increased
@@ -161,9 +161,9 @@ def test_liquidations_debt_changes(
         susd_whale
     )  # the whale receives SNX (debt paid + 10%) as reward for liquidating
     assert (
-        amount_needed * 11 / 70 * 0.999
+        amount_needed * 11 / 200 * 0.999
         < Wei("1000 ether") - snx.balanceOf(bob)
-        < amount_needed * 11 / 70 * 1.001
+        < amount_needed * 11 / 200 * 1.001
     )  # the losses where correctly calculated
 
     chain.revert()
