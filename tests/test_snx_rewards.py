@@ -36,7 +36,6 @@ def test_snx_rewards(
     assert strategy.balanceOfSusd() == 0
     assert strategy.balanceOfSusdInVault() > 0
     initial_debt = strategy.balanceOfDebt()
-
     # We don't have any reward because the period is not over yet
     fee_pool = Contract(resolver.getAddress(encode_single("bytes32", b"FeePool")))
     assert fee_pool.feesAvailable(strategy)[1] == 0
@@ -47,16 +46,29 @@ def test_snx_rewards(
     fee_pool.closeCurrentFeePeriod({"from": gov})
     assert fee_pool.feesAvailable(strategy)[1] > 0
 
+    rewards_to_be_claimed = fee_pool.feesAvailable(strategy)[1]
+    previous_escrowed_want = strategy.balanceOfEscrowedWant()
+
     strategy.harvest({"from": gov})
     chain.sleep(60 * 60 * 8)  # Sleep 8 hours
     chain.mine(1)
 
-    # Since we got snx rewards, we have more collateral, hence more susd should be issued
-    assert strategy.balanceOfDebt() > initial_debt
-
-    previous_snx_balance = snx.balanceOf(vault)
+    # we check we received escrowed want and sUSD
+    assert (
+        previous_escrowed_want + rewards_to_be_claimed
+        == strategy.balanceOfEscrowedWant()
+    )
+    assert (
+        vault.strategies(strategy).dict()["totalGain"] > 0
+    )  # fees sold for Want and have been taken as gain
 
     strategy.harvest({"from": gov})
+    chain.sleep(60 * 60 * 8)  # Sleep 8 hours
+    chain.mine(1)
 
-    assert previous_snx_balance < snx.balanceOf(vault)
+    vault.withdraw({"from": bob})
+    assert strategy.balanceOfSusd() == 0
+    assert strategy.balanceOfSusdInVault() == 0
+    assert strategy.balanceOfWant() == 0
+
     chain.revert()

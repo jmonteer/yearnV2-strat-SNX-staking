@@ -116,11 +116,13 @@ contract Strategy is BaseStrategy {
 
     function estimatedTotalAssets() public view override returns (uint256) {
         return
-            balanceOfWant()
-                .add(estimatedProfit())
-                .add(sUSDToWant(balanceOfSusdInVault()))
-                .add(sUSDToWant(balanceOfSusd()))
-                .sub(sUSDToWant(balanceOfDebt()));
+            balanceOfWant().add(estimatedProfit()).add(
+                sUSDToWant(
+                    balanceOfSusdInVault().add(balanceOfSusd()).sub(
+                        balanceOfDebt()
+                    )
+                )
+            );
     }
 
     function prepareReturn(uint256 _debtOutstanding)
@@ -184,7 +186,15 @@ contract Strategy is BaseStrategy {
             // NOTE: min threshold to act on differences = 1e16 (ratioThreshold)
             // if there is enough collateral to issue Synth, issue it
             // this should put the c-ratio around 500% (i.e. debt ratio around 20%)
-            if (balanceOfWant() > 0) _synthetix().issueMaxSynths();
+            uint256 _maxSynths = _synthetix().maxIssuableSynths(address(this));
+            uint256 _debtBalance = balanceOfDebt();
+            // only issue new debt if it is going to be used
+            if (
+                _maxSynths > _debtBalance &&
+                _maxSynths.sub(_debtBalance) >= MIN_ISSUE
+            ) {
+                _synthetix().issueMaxSynths();
+            }
         }
 
         // If there is susd in the strategy, send it to the susd vault
@@ -293,6 +303,11 @@ contract Strategy is BaseStrategy {
                 // buy enough sUSD to repay outstanding debt, selling `want` (SNX)
                 if (_unlockedWant() > 0) {
                     // TODO: might fail if _unlockedWant > 0 but not enough to buy `amountToRepay` sUSD
+                    // WARNING: this will happen if:
+                    //  escrowed balance is a relevant share of the collateral
+                    //  && debt has increased due to debt pool
+                    //  because we won't have enough to repay full debt and we cannot sell escrowed balance
+                    // potential solution: find how much is worth the unlockedWant and cap the buying amount
                     buySusdWithWant(amountToRepay);
                 }
                 // amountToRepay should equal balanceOfSusd() (we just bought `amountToRepay` sUSD)
@@ -314,6 +329,7 @@ contract Strategy is BaseStrategy {
         uint256 feesAvailable;
         uint256 rewardsAvailable;
         (feesAvailable, rewardsAvailable) = _getFeesAvailable();
+
         if (feesAvailable > 0 || rewardsAvailable > 0) {
             // claim fees from Synthetix
             // claim fees (in sUSD) and rewards (in want (SNX))
@@ -322,7 +338,7 @@ contract Strategy is BaseStrategy {
 
             // NOTE: we use issuanceRatio because that is what will put us on 500% c-ratio (i.e. 20% debt ratio)
             uint256 _targetDebt =
-                getIssuanceRatio().mul(_collateral()).div(1e18);
+                getIssuanceRatio().mul(wantToSUSD(_collateral())).div(1e18);
             uint256 _balanceOfDebt = balanceOfDebt();
             bool claim = true;
 
@@ -457,7 +473,7 @@ contract Strategy is BaseStrategy {
             withdrawFromSUSDVault(_amountToBurn.sub(_balance));
         }
 
-        _synthetix().burnSynthsToTarget();
+        if (_amountToBurn > 0) _synthetix().burnSynthsToTarget();
         return _amountToBurn;
     }
 
