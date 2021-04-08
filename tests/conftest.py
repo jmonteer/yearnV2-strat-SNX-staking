@@ -97,11 +97,23 @@ def snx_oracle(gov, accounts, SnxOracle):
     new_oracle = gov.deploy(SnxOracle, "0xd69b189020EF614796578AfE4d10378c5e7e1138")
     exchange_rate.setOracle(new_oracle, {"from": er_gov})
 
-    # If we don't remove the aggregator prices update through oracle are not considered
-    exchange_rate.removeAggregator(encode_single("bytes32", b"SNX"), {"from": er_gov})
-    exchange_rate.removeAggregator(encode_single("bytes32", b"sBTC"), {"from": er_gov})
-    exchange_rate.removeAggregator(encode_single("bytes32", b"sETH"), {"from": er_gov})
-    yield new_oracle
+    if (
+        exchange_rate.aggregators(encode_single("bytes32", b"SNX"))
+        == "0x0000000000000000000000000000000000000000"
+    ):
+        yield new_oracle
+    else:
+        # If we don't remove the aggregator prices update through oracle are not considered
+        exchange_rate.removeAggregator(
+            encode_single("bytes32", b"SNX"), {"from": er_gov}
+        )
+        exchange_rate.removeAggregator(
+            encode_single("bytes32", b"sBTC"), {"from": er_gov}
+        )
+        exchange_rate.removeAggregator(
+            encode_single("bytes32", b"sETH"), {"from": er_gov}
+        )
+        yield new_oracle
 
 
 @pytest.fixture
