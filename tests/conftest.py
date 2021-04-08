@@ -91,18 +91,7 @@ def snx_whale(accounts):
 
 
 @pytest.fixture
-def resolver(accounts):
-    yield Contract("0x823bE81bbF96BEc0e25CA13170F5AaCb5B79ba83")
-
-
-@pytest.fixture
-def issuer(accounts, resolver):
-    address = resolver.getAddress(encode_single("bytes32", b"Issuer"))
-    yield Contract(address)
-
-
-@pytest.fixture
-def snx_oracle(gov, accounts, SnxOracle, issuer):
+def snx_oracle(gov, accounts, SnxOracle):
     exchange_rate = Contract("0xd69b189020EF614796578AfE4d10378c5e7e1138")
     er_gov = accounts.at(exchange_rate.owner(), force=True)
     new_oracle = gov.deploy(SnxOracle, "0xd69b189020EF614796578AfE4d10378c5e7e1138")

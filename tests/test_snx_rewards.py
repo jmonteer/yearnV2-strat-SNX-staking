@@ -51,10 +51,6 @@ def test_snx_rewards(
     chain.sleep(60 * 60 * 8)  # Sleep 8 hours
     chain.mine(1)
 
-    strategy.harvest({"from": gov})
-    chain.sleep(60 * 60 * 24 * 7)  # Sleep 7 days
-    chain.mine(1)
-
     # Since we got snx rewards, we have more collateral, hence more susd should be issued
     assert strategy.balanceOfDebt() > initial_debt
 

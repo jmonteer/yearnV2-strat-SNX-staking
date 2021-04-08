@@ -14,6 +14,7 @@ import "@openzeppelin/contracts/math/Math.sol";
 import "../interfaces/ISynthetix.sol";
 import "../interfaces/IIssuer.sol";
 import "../interfaces/IFeePool.sol";
+import "../interfaces/IReadProxy.sol";
 import "../interfaces/IAddressResolver.sol";
 import "../interfaces/IExchangeRates.sol";
 import "../interfaces/IRewardEscrowV2.sol";
@@ -35,8 +36,8 @@ contract Strategy is BaseStrategy {
 
     address public constant susd =
         address(0x57Ab1ec28D129707052df4dF418D58a2D46d5f51);
-    address public constant resolver =
-        address(0x823bE81bbF96BEc0e25CA13170F5AaCb5B79ba83);
+    IReadProxy public constant readProxy =
+        IReadProxy(address(0x4E3b31eB0E5CB73641EE1E65E7dCEFe520bA3ef2));
     address public constant WETH =
         address(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     // ISushiRouter public constant sushi =
@@ -615,33 +616,27 @@ contract Strategy is BaseStrategy {
 
     // ********************** ADDRESS RESOLVER SHORTCUTS **********************
 
+    function resolver() public view returns (IAddressResolver) {
+        return IAddressResolver(readProxy.target());
+    }
+
     function _synthetix() internal view returns (ISynthetix) {
-        return
-            ISynthetix(
-                IAddressResolver(resolver).getAddress(CONTRACT_SYNTHETIX)
-            );
+        return ISynthetix(resolver().getAddress(CONTRACT_SYNTHETIX));
     }
 
     function _feePool() internal view returns (IFeePool) {
-        return
-            IFeePool(IAddressResolver(resolver).getAddress(CONTRACT_FEEPOOL));
+        return IFeePool(resolver().getAddress(CONTRACT_FEEPOOL));
     }
 
     function _issuer() internal view returns (IIssuer) {
-        return IIssuer(IAddressResolver(resolver).getAddress(CONTRACT_ISSUER));
+        return IIssuer(resolver().getAddress(CONTRACT_ISSUER));
     }
 
     function _exchangeRates() internal view returns (IExchangeRates) {
-        return
-            IExchangeRates(
-                IAddressResolver(resolver).getAddress(CONTRACT_EXRATES)
-            );
+        return IExchangeRates(resolver().getAddress(CONTRACT_EXRATES));
     }
 
     function _rewardEscrowV2() internal view returns (IRewardEscrowV2) {
-        return
-            IRewardEscrowV2(
-                IAddressResolver(resolver).getAddress(CONTRACT_REWARDESCROW_V2)
-            );
+        return IRewardEscrowV2(resolver().getAddress(CONTRACT_REWARDESCROW_V2));
     }
 }
