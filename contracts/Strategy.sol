@@ -312,7 +312,10 @@ contract Strategy is BaseStrategy {
                 // buy enough sUSD to repay outstanding debt, selling `want` (SNX)
                 // or maximum sUSD with `want` available
                 uint256 amountToBuy =
-                    Math.min(_getSusdForWant(_unlockedWant()), amountToRepay);
+                    Math.min(
+                        _getSusdForWant(_unlockedWant()),
+                        amountToRepay.sub(repaidAmount)
+                    );
                 if (amountToBuy > 0) {
                     buySusdWithWant(amountToBuy);
                 }
