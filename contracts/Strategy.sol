@@ -325,7 +325,7 @@ contract Strategy is BaseStrategy {
             burnSusd(amountToRepay.sub(repaidAmount)); // this method is subject to minimumStakePeriod (see Synthetix docs)
             repaidAmount = amountToRepay;
         }
-        emit RepayDebt(repaidAmount, _balanceOfDebt.sub(repaidAmount));
+        emit RepayDebt(repaidAmount, _debtBalance.sub(repaidAmount));
     }
 
     // two profit sources: Synthetix protocol and Yearn sUSD Vault
