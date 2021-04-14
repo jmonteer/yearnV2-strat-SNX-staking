@@ -60,6 +60,12 @@ contract Strategy is BaseStrategy {
     bytes32 private constant CONTRACT_ISSUER = "Issuer";
     bytes32 private constant CONTRACT_FEEPOOL = "FeePool";
 
+    // ********************** EVENTS **********************
+
+    event RepayDebt(uint256 repaidAmount, uint256 debtAfterRepayment);
+
+    // ********************** CONSTRUCTOR **********************
+
     constructor(address _vault, address _susdVault)
         public
         BaseStrategy(_vault)
@@ -319,10 +325,8 @@ contract Strategy is BaseStrategy {
             burnSusd(amountToRepay.sub(repaidAmount)); // this method is subject to minimumStakePeriod (see Synthetix docs)
             repaidAmount = amountToRepay;
         }
-        emit RepayDebt(repaidAmount);
+        emit RepayDebt(repaidAmount, _balanceOfDebt.sub(repaidAmount));
     }
-
-    event RepayDebt(uint256 repaidAmount);
 
     // two profit sources: Synthetix protocol and Yearn sUSD Vault
     function claimProfits() internal returns (bool) {
