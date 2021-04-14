@@ -99,13 +99,16 @@ contract Strategy is BaseStrategy {
     }
 
     // This method is used to migrate the vault where we deposit the sUSD for yield. It should be rarely used
-    function migrateSusdVault(IVault newSusdVault) external onlyGovernance {
+    function migrateSusdVault(IVault newSusdVault, uint256 maxLoss)
+        external
+        onlyGovernance
+    {
         // we tolerate losses to avoid being locked in the vault if things don't work out
         // governance must take this into account before migrating
         susdVault.withdraw(
             susdVault.balanceOf(address(this)),
             address(this),
-            10_000
+            maxLoss
         );
         IERC20(susd).safeApprove(address(susdVault), 0);
 
