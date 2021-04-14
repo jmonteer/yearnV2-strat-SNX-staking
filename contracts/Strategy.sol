@@ -305,19 +305,16 @@ contract Strategy is BaseStrategy {
                     if (burnSusd(currentSusdBalance)) {
                         // subject to minimumStakePeriod
                         // if successful burnt, update remaining amountToRepay
-                        repaidAmount = repaidAmount.add(currentSusdBalance);
+                        // repaidAmount is previous debt minus current debt
+                        repaidAmount = _debtBalance.sub(balanceOfDebt());
                     }
                 }
-
                 // buy enough sUSD to repay outstanding debt, selling `want` (SNX)
-                if (_unlockedWant() > 0) {
-                    // TODO: might fail if _unlockedWant > 0 but not enough to buy `amountToRepay` sUSD
-                    // WARNING: this will happen if:
-                    //  escrowed balance is a relevant share of the collateral
-                    //  && debt has increased due to debt pool
-                    //  because we won't have enough to repay full debt and we cannot sell escrowed balance
-                    // potential solution: find how much is worth the unlockedWant and cap the buying amount
-                    buySusdWithWant(amountToRepay);
+                // or maximum sUSD with `want` available
+                uint256 amountToBuy =
+                    Math.min(_getSusdForWant(_unlockedWant()), amountToRepay);
+                if (amountToBuy > 0) {
+                    buySusdWithWant(amountToBuy);
                 }
                 // amountToRepay should equal balanceOfSusd() (we just bought `amountToRepay` sUSD)
             }
@@ -566,6 +563,23 @@ contract Strategy is BaseStrategy {
         }
 
         return _amount.mul(_exchangeRates().rateForCurrency("SNX")).div(1e18);
+    }
+
+    function _getSusdForWant(uint256 _wantAmount)
+        internal
+        view
+        returns (uint256)
+    {
+        if (_wantAmount == 0) {
+            return 0;
+        }
+        address[] memory path = new address[](3);
+        path[0] = address(want);
+        path[1] = address(WETH);
+        path[2] = address(susd);
+
+        uint256[] memory amounts = sushi.getAmountsOut(_wantAmount, path);
+        return amounts[amounts.length - 1];
     }
 
     // ********************** BALANCES & RATIOS **********************
