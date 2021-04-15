@@ -28,7 +28,6 @@ contract Strategy is BaseStrategy {
     using SafeMath for uint256;
 
     uint256 public constant MIN_ISSUE = 50 * 1e18;
-    // TODO: AFTER APE.TAX convert this to constant
     uint256 public ratioThreshold = 1e15;
     uint256 public constant MAX_RATIO = type(uint256).max;
     uint256 public constant MAX_BPS = 10_000;
