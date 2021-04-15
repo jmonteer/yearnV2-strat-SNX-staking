@@ -72,3 +72,4 @@ jobs:
         brownie test tests/test_snx_price_changes.py -s
         brownie test tests/test_snx_rewards.py -s
         brownie test tests/test_target_multiplier.py -s
+        brownie test tests/test_router.py -s

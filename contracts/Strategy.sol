@@ -40,10 +40,12 @@ contract Strategy is BaseStrategy {
         IReadProxy(address(0x4E3b31eB0E5CB73641EE1E65E7dCEFe520bA3ef2));
     address public constant WETH =
         address(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
-    // ISushiRouter public constant sushi =
-    //     ISushiRouter(address(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F));
 
-    ISushiRouter public constant sushi =
+    ISushiRouter public constant sushiswap =
+        ISushiRouter(address(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F));
+    ISushiRouter public constant uniswap =
+        ISushiRouter(address(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D));
+    ISushiRouter public router =
         ISushiRouter(address(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D));
 
     uint256 public targetRatioMultiplier = 12_500;
@@ -78,12 +80,24 @@ contract Strategy is BaseStrategy {
         // To deposit sUSD in the sUSD vault
         IERC20(susd).safeApprove(address(_susdVault), type(uint256).max);
         // To exchange sUSD for SNX
-        IERC20(susd).safeApprove(address(sushi), type(uint256).max);
+        IERC20(susd).safeApprove(address(uniswap), type(uint256).max);
+        IERC20(susd).safeApprove(address(sushiswap), type(uint256).max);
         // To exchange SNX for sUSD
-        IERC20(want).safeApprove(address(sushi), type(uint256).max);
+        IERC20(want).safeApprove(address(uniswap), type(uint256).max);
+        IERC20(want).safeApprove(address(sushiswap), type(uint256).max);
     }
 
     // ********************** SETTERS **********************
+    function setRouter(address _router) external onlyAuthorized {
+        if (_router == address(sushiswap)) {
+            router = sushiswap;
+        } else if (_router == address(uniswap)) {
+            router = uniswap;
+        } else {
+            revert("not uni/sushi");
+        }
+    }
+
     function setTargetRatioMultiplier(uint256 _targetRatioMultiplier) external {
         require(
             msg.sender == governance() ||
@@ -386,7 +400,7 @@ contract Strategy is BaseStrategy {
             withdrawFromSUSDVault(_valueToWithdraw);
         }
 
-        // sell profits in sUSD for want (SNX) using sushiswap
+        // sell profits in sUSD for want (SNX) using router
         uint256 _balance = balanceOfSusd();
         if (_balance > 0) {
             buyWantWithSusd(_balance);
@@ -510,7 +524,7 @@ contract Strategy is BaseStrategy {
         path[1] = address(WETH);
         path[2] = address(want);
 
-        sushi.swapExactTokensForTokens(_amount, 0, path, address(this), now);
+        router.swapExactTokensForTokens(_amount, 0, path, address(this), now);
     }
 
     function buySusdWithWant(uint256 _amount) internal {
@@ -524,7 +538,7 @@ contract Strategy is BaseStrategy {
         path[2] = address(susd);
 
         // we use swapTokensForExactTokens because we need an exact sUSD amount
-        sushi.swapTokensForExactTokens(
+        router.swapTokensForExactTokens(
             _amount,
             type(uint256).max,
             path,
@@ -582,7 +596,7 @@ contract Strategy is BaseStrategy {
         path[1] = address(WETH);
         path[2] = address(susd);
 
-        uint256[] memory amounts = sushi.getAmountsOut(_wantAmount, path);
+        uint256[] memory amounts = router.getAmountsOut(_wantAmount, path);
         return amounts[amounts.length - 1];
     }
 
