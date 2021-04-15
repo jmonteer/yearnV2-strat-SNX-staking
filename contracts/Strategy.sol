@@ -554,11 +554,10 @@ contract Strategy is BaseStrategy {
 
     function estimatedProfit() public view returns (uint256) {
         uint256 availableFees; // in sUSD
-        uint256 availableRewards; // in `want` (SNX)
 
-        (availableFees, availableRewards) = _getFeesAvailable();
+        (availableFees, ) = _getFeesAvailable();
 
-        return availableRewards.add(sUSDToWant(availableFees));
+        return sUSDToWant(availableFees);
     }
 
     function getTargetDebt(uint256 _targetCollateral)
