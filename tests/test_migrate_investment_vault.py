@@ -54,7 +54,7 @@ def test_migrate_investment_vault(
 
     previous_balance = strategy.balanceOfSusdInVault()
 
-    strategy.migrateSusdVault(new_vault, {"from": gov})
+    strategy.migrateSusdVault(new_vault, 10_000, {"from": gov})
 
     assert previous_balance == new_vault.totalAssets()
     assert previous_balance == strategy.balanceOfSusdInVault()
