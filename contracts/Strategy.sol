@@ -138,14 +138,17 @@ contract Strategy is BaseStrategy {
     }
 
     function estimatedTotalAssets() public view override returns (uint256) {
-        return
+        uint256 totalAssets =
             balanceOfWant().add(estimatedProfit()).add(
-                sUSDToWant(
-                    balanceOfSusdInVault().add(balanceOfSusd()).sub(
-                        balanceOfDebt()
-                    )
-                )
+                sUSDToWant(balanceOfSusdInVault().add(balanceOfSusd()))
             );
+        uint256 totalLiabilities = sUSDToWant(balanceOfDebt());
+        // NOTE: the ternary operator is required because debt can be higher than assets
+        // due to i) increase in debt or ii) losses in invested assets
+        return
+            totalAssets > totalLiabilities
+                ? totalAssets.sub(totalLiabilities)
+                : 0;
     }
 
     function prepareReturn(uint256 _debtOutstanding)
