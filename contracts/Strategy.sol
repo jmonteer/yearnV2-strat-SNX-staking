@@ -27,9 +27,8 @@ contract Strategy is BaseStrategy {
     using Address for address;
     using SafeMath for uint256;
 
-    // TODO: update this to avoid constant new issues of synths
     uint256 public constant MIN_ISSUE = 50 * 1e18;
-    // TODO: convert this to constant
+    // TODO: AFTER APE.TAX convert this to constant
     uint256 public ratioThreshold = 1e15;
     uint256 public constant MAX_RATIO = type(uint256).max;
     uint256 public constant MAX_BPS = 10_000;
@@ -158,11 +157,16 @@ contract Strategy is BaseStrategy {
             uint256 _debtPayment
         )
     {
-        uint256 balanceOfWantBefore = balanceOfWant();
-        // TODO: we would not take as profit SNX directly sent to the strategy
+        uint256 totalDebt = vault.strategies(address(this)).totalDebt;
+
         claimProfits();
         vestNextRewardsEntry();
-        _profit = balanceOfWant().sub(balanceOfWantBefore);
+
+        uint256 totalAssetsAfterProfit = estimatedTotalAssets();
+
+        _profit = totalAssetsAfterProfit > totalDebt
+            ? totalAssetsAfterProfit.sub(totalDebt)
+            : 0;
 
         // if the vault is claiming repayment of debt
         if (_debtOutstanding > 0) {
@@ -390,9 +394,6 @@ contract Strategy is BaseStrategy {
         }
 
         // claim profits from Yearn sUSD Vault
-        // TODO: Update this taking into account that debt is not always == sUSD issued
-        // jmonteer: I would not withdraw profits until the balanceOfDebt is lower than balanceOfSusdInVault
-        // jmonteer: even if it is technically in profits because amount deposited is lower than amount to withdraw
         if (balanceOfDebt() < balanceOfSusdInVault()) {
             // balance
             uint256 _valueToWithdraw =
@@ -501,7 +502,6 @@ contract Strategy is BaseStrategy {
 
     function withdrawFromSUSDVault(uint256 _amount) internal {
         // Don't leave less than MIN_ISSUE sUSD in the vault
-        // TODO: what happens if there are losses in the vault?
         if (
             _amount > balanceOfSusdInVault() ||
             balanceOfSusdInVault().sub(_amount) <= MIN_ISSUE
