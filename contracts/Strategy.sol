@@ -2,7 +2,7 @@
 pragma solidity 0.6.12;
 pragma experimental ABIEncoderV2;
 
-import {BaseStrategy} from "@yearnvaults/contracts/BaseStrategy.sol";
+import {BaseStrategy, VaultAPI} from "@yearnvaults/contracts/BaseStrategy.sol";
 import {
     SafeERC20,
     SafeMath,
@@ -84,10 +84,11 @@ contract Strategy is BaseStrategy {
     }
 
     // ********************** SETTERS **********************
-    function setTargetRatioMultiplier(uint256 _targetRatioMultiplier)
-        external
-        onlyGovernance
-    {
+    function setTargetRatioMultiplier(uint256 _targetRatioMultiplier) external {
+        require(
+            msg.sender == governance() ||
+                msg.sender == VaultAPI(address(vault)).management()
+        );
         targetRatioMultiplier = _targetRatioMultiplier;
     }
 
