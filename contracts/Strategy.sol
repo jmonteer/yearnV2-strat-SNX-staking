@@ -31,6 +31,7 @@ contract Strategy is BaseStrategy {
     uint256 public ratioThreshold = 1e15;
     uint256 public constant MAX_RATIO = type(uint256).max;
     uint256 public constant MAX_BPS = 10_000;
+    uint256 public constant USE_SUSHI = 1;
 
     address public constant susd =
         address(0x57Ab1ec28D129707052df4dF418D58a2D46d5f51);
@@ -86,13 +87,11 @@ contract Strategy is BaseStrategy {
     }
 
     // ********************** SETTERS **********************
-    function setRouter(address _router) external onlyAuthorized {
-        if (_router == address(sushiswap)) {
+    function setRouter(uint256 _isSushi) external onlyAuthorized {
+        if (_isSushi == USE_SUSHI) {
             router = sushiswap;
-        } else if (_router == address(uniswap)) {
-            router = uniswap;
         } else {
-            revert("not uni/sushi");
+            router = uniswap;
         }
     }
 
