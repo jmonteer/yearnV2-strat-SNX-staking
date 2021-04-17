@@ -130,6 +130,13 @@ contract Strategy is BaseStrategy {
         newSusdVault.deposit();
     }
 
+    // ********************** MANUAL **********************
+
+    function manuallyRepayDebt(uint256 amount) external onlyAuthorized {
+        // To be used in case of emergencies, to operate the vault manually
+        repayDebt(amount);
+    }
+
     // ********************** YEARN STRATEGY **********************
 
     function name() external view override returns (string memory) {
