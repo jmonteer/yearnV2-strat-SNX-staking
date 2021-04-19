@@ -2,7 +2,7 @@
 pragma solidity 0.6.12;
 pragma experimental ABIEncoderV2;
 
-import {BaseStrategy} from "@yearnvaults/contracts/BaseStrategy.sol";
+import {BaseStrategy, VaultAPI} from "@yearnvaults/contracts/BaseStrategy.sol";
 import {
     SafeERC20,
     SafeMath,
@@ -27,9 +27,7 @@ contract Strategy is BaseStrategy {
     using Address for address;
     using SafeMath for uint256;
 
-    // TODO: update this to avoid constant new issues of synths
     uint256 public constant MIN_ISSUE = 50 * 1e18;
-    // TODO: convert this to constant
     uint256 public ratioThreshold = 1e15;
     uint256 public constant MAX_RATIO = type(uint256).max;
     uint256 public constant MAX_BPS = 10_000;
@@ -40,10 +38,12 @@ contract Strategy is BaseStrategy {
         IReadProxy(address(0x4E3b31eB0E5CB73641EE1E65E7dCEFe520bA3ef2));
     address public constant WETH =
         address(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
-    // ISushiRouter public constant sushi =
-    //     ISushiRouter(address(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F));
 
-    ISushiRouter public constant sushi =
+    ISushiRouter public constant sushiswap =
+        ISushiRouter(address(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F));
+    ISushiRouter public constant uniswap =
+        ISushiRouter(address(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D));
+    ISushiRouter public router =
         ISushiRouter(address(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D));
 
     uint256 public targetRatioMultiplier = 12_500;
@@ -60,6 +60,12 @@ contract Strategy is BaseStrategy {
     bytes32 private constant CONTRACT_ISSUER = "Issuer";
     bytes32 private constant CONTRACT_FEEPOOL = "FeePool";
 
+    // ********************** EVENTS **********************
+
+    event RepayDebt(uint256 repaidAmount, uint256 debtAfterRepayment);
+
+    // ********************** CONSTRUCTOR **********************
+
     constructor(address _vault, address _susdVault)
         public
         BaseStrategy(_vault)
@@ -72,16 +78,29 @@ contract Strategy is BaseStrategy {
         // To deposit sUSD in the sUSD vault
         IERC20(susd).safeApprove(address(_susdVault), type(uint256).max);
         // To exchange sUSD for SNX
-        IERC20(susd).safeApprove(address(sushi), type(uint256).max);
+        IERC20(susd).safeApprove(address(uniswap), type(uint256).max);
+        IERC20(susd).safeApprove(address(sushiswap), type(uint256).max);
         // To exchange SNX for sUSD
-        IERC20(want).safeApprove(address(sushi), type(uint256).max);
+        IERC20(want).safeApprove(address(uniswap), type(uint256).max);
+        IERC20(want).safeApprove(address(sushiswap), type(uint256).max);
     }
 
     // ********************** SETTERS **********************
-    function setTargetRatioMultiplier(uint256 _targetRatioMultiplier)
-        external
-        onlyGovernance
-    {
+    function setRouter(uint256 _isSushi) external onlyAuthorized {
+        if (_isSushi == uint256(1)) {
+            router = sushiswap;
+        } else if (_isSushi == uint256(0)) {
+            router = uniswap;
+        } else {
+            revert("!invalid-arg. Use 1 for sushi. 0 for uni");
+        }
+    }
+
+    function setTargetRatioMultiplier(uint256 _targetRatioMultiplier) external {
+        require(
+            msg.sender == governance() ||
+                msg.sender == VaultAPI(address(vault)).management()
+        );
         targetRatioMultiplier = _targetRatioMultiplier;
     }
 
@@ -93,19 +112,29 @@ contract Strategy is BaseStrategy {
     }
 
     // This method is used to migrate the vault where we deposit the sUSD for yield. It should be rarely used
-    function migrateSusdVault(IVault newSusdVault) external onlyGovernance {
+    function migrateSusdVault(IVault newSusdVault, uint256 maxLoss)
+        external
+        onlyGovernance
+    {
         // we tolerate losses to avoid being locked in the vault if things don't work out
         // governance must take this into account before migrating
         susdVault.withdraw(
             susdVault.balanceOf(address(this)),
             address(this),
-            10_000
+            maxLoss
         );
         IERC20(susd).safeApprove(address(susdVault), 0);
 
         susdVault = newSusdVault;
         IERC20(susd).safeApprove(address(newSusdVault), type(uint256).max);
         newSusdVault.deposit();
+    }
+
+    // ********************** MANUAL **********************
+
+    function manuallyRepayDebt(uint256 amount) external onlyAuthorized {
+        // To be used in case of emergencies, to operate the vault manually
+        repayDebt(amount);
     }
 
     // ********************** YEARN STRATEGY **********************
@@ -115,14 +144,17 @@ contract Strategy is BaseStrategy {
     }
 
     function estimatedTotalAssets() public view override returns (uint256) {
-        return
+        uint256 totalAssets =
             balanceOfWant().add(estimatedProfit()).add(
-                sUSDToWant(
-                    balanceOfSusdInVault().add(balanceOfSusd()).sub(
-                        balanceOfDebt()
-                    )
-                )
+                sUSDToWant(balanceOfSusdInVault().add(balanceOfSusd()))
             );
+        uint256 totalLiabilities = sUSDToWant(balanceOfDebt());
+        // NOTE: the ternary operator is required because debt can be higher than assets
+        // due to i) increase in debt or ii) losses in invested assets
+        return
+            totalAssets > totalLiabilities
+                ? totalAssets.sub(totalLiabilities)
+                : 0;
     }
 
     function prepareReturn(uint256 _debtOutstanding)
@@ -134,11 +166,16 @@ contract Strategy is BaseStrategy {
             uint256 _debtPayment
         )
     {
-        uint256 balanceOfWantBefore = balanceOfWant();
-        // TODO: we would not take as profit SNX directly sent to the strategy
+        uint256 totalDebt = vault.strategies(address(this)).totalDebt;
+
         claimProfits();
         vestNextRewardsEntry();
-        _profit = balanceOfWant().sub(balanceOfWantBefore);
+
+        uint256 totalAssetsAfterProfit = estimatedTotalAssets();
+
+        _profit = totalAssetsAfterProfit > totalDebt
+            ? totalAssetsAfterProfit.sub(totalDebt)
+            : 0;
 
         // if the vault is claiming repayment of debt
         if (_debtOutstanding > 0) {
@@ -296,19 +333,19 @@ contract Strategy is BaseStrategy {
                     if (burnSusd(currentSusdBalance)) {
                         // subject to minimumStakePeriod
                         // if successful burnt, update remaining amountToRepay
-                        repaidAmount = repaidAmount.add(currentSusdBalance);
+                        // repaidAmount is previous debt minus current debt
+                        repaidAmount = _debtBalance.sub(balanceOfDebt());
                     }
                 }
-
                 // buy enough sUSD to repay outstanding debt, selling `want` (SNX)
-                if (_unlockedWant() > 0) {
-                    // TODO: might fail if _unlockedWant > 0 but not enough to buy `amountToRepay` sUSD
-                    // WARNING: this will happen if:
-                    //  escrowed balance is a relevant share of the collateral
-                    //  && debt has increased due to debt pool
-                    //  because we won't have enough to repay full debt and we cannot sell escrowed balance
-                    // potential solution: find how much is worth the unlockedWant and cap the buying amount
-                    buySusdWithWant(amountToRepay);
+                // or maximum sUSD with `want` available
+                uint256 amountToBuy =
+                    Math.min(
+                        _getSusdForWant(_unlockedWant()),
+                        amountToRepay.sub(repaidAmount)
+                    );
+                if (amountToBuy > 0) {
+                    buySusdWithWant(amountToBuy);
                 }
                 // amountToRepay should equal balanceOfSusd() (we just bought `amountToRepay` sUSD)
             }
@@ -319,10 +356,8 @@ contract Strategy is BaseStrategy {
             burnSusd(amountToRepay.sub(repaidAmount)); // this method is subject to minimumStakePeriod (see Synthetix docs)
             repaidAmount = amountToRepay;
         }
-        emit RepayDebt(repaidAmount);
+        emit RepayDebt(repaidAmount, _debtBalance.sub(repaidAmount));
     }
-
-    event RepayDebt(uint256 repaidAmount);
 
     // two profit sources: Synthetix protocol and Yearn sUSD Vault
     function claimProfits() internal returns (bool) {
@@ -368,9 +403,6 @@ contract Strategy is BaseStrategy {
         }
 
         // claim profits from Yearn sUSD Vault
-        // TODO: Update this taking into account that debt is not always == sUSD issued
-        // jmonteer: I would not withdraw profits until the balanceOfDebt is lower than balanceOfSusdInVault
-        // jmonteer: even if it is technically in profits because amount deposited is lower than amount to withdraw
         if (balanceOfDebt() < balanceOfSusdInVault()) {
             // balance
             uint256 _valueToWithdraw =
@@ -378,7 +410,7 @@ contract Strategy is BaseStrategy {
             withdrawFromSUSDVault(_valueToWithdraw);
         }
 
-        // sell profits in sUSD for want (SNX) using sushiswap
+        // sell profits in sUSD for want (SNX) using router
         uint256 _balance = balanceOfSusd();
         if (_balance > 0) {
             buyWantWithSusd(_balance);
@@ -479,7 +511,6 @@ contract Strategy is BaseStrategy {
 
     function withdrawFromSUSDVault(uint256 _amount) internal {
         // Don't leave less than MIN_ISSUE sUSD in the vault
-        // TODO: what happens if there are losses in the vault?
         if (
             _amount > balanceOfSusdInVault() ||
             balanceOfSusdInVault().sub(_amount) <= MIN_ISSUE
@@ -502,7 +533,7 @@ contract Strategy is BaseStrategy {
         path[1] = address(WETH);
         path[2] = address(want);
 
-        sushi.swapExactTokensForTokens(_amount, 0, path, address(this), now);
+        router.swapExactTokensForTokens(_amount, 0, path, address(this), now);
     }
 
     function buySusdWithWant(uint256 _amount) internal {
@@ -516,7 +547,7 @@ contract Strategy is BaseStrategy {
         path[2] = address(susd);
 
         // we use swapTokensForExactTokens because we need an exact sUSD amount
-        sushi.swapTokensForExactTokens(
+        router.swapTokensForExactTokens(
             _amount,
             type(uint256).max,
             path,
@@ -529,11 +560,10 @@ contract Strategy is BaseStrategy {
 
     function estimatedProfit() public view returns (uint256) {
         uint256 availableFees; // in sUSD
-        uint256 availableRewards; // in `want` (SNX)
 
-        (availableFees, availableRewards) = _getFeesAvailable();
+        (availableFees, ) = _getFeesAvailable();
 
-        return availableRewards.add(sUSDToWant(availableFees));
+        return sUSDToWant(availableFees);
     }
 
     function getTargetDebt(uint256 _targetCollateral)
@@ -559,6 +589,23 @@ contract Strategy is BaseStrategy {
         }
 
         return _amount.mul(_exchangeRates().rateForCurrency("SNX")).div(1e18);
+    }
+
+    function _getSusdForWant(uint256 _wantAmount)
+        internal
+        view
+        returns (uint256)
+    {
+        if (_wantAmount == 0) {
+            return 0;
+        }
+        address[] memory path = new address[](3);
+        path[0] = address(want);
+        path[1] = address(WETH);
+        path[2] = address(susd);
+
+        uint256[] memory amounts = router.getAmountsOut(_wantAmount, path);
+        return amounts[amounts.length - 1];
     }
 
     // ********************** BALANCES & RATIOS **********************

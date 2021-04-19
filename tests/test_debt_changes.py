@@ -77,8 +77,8 @@ def test_debt_increases(
     assert previous_ratio == strategy.getCurrentRatio()
 
     # increase debt pool value up to the point that debt ratio is unhealthy
-    snx_oracle.updateBTCPrice(Wei("100000 ether"), {"from": gov})
-    snx_oracle.updateETHPrice(Wei("3000 ether"), {"from": gov})
+    snx_oracle.updateBTCPrice(Wei("120000 ether"), {"from": gov})
+    snx_oracle.updateETHPrice(Wei("3500 ether"), {"from": gov})
     debtCache.takeDebtSnapshot({"from": debtCache.owner()})
 
     # the strategy should repay debt and get to targetRatio without selling
