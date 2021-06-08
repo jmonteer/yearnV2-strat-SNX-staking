@@ -104,10 +104,11 @@ contract Strategy is BaseStrategy {
         targetRatioMultiplier = _targetRatioMultiplier;
     }
 
-    function setRatioThreshold(uint256 _ratioThreshold)
-        external
-        onlyStrategist
-    {
+    function setRatioThreshold(uint256 _ratioThreshold) external {
+        require(
+            msg.sender == governance() ||
+                msg.sender == VaultAPI(address(vault)).management()
+        );
         ratioThreshold = _ratioThreshold;
     }
 
@@ -282,8 +283,9 @@ contract Strategy is BaseStrategy {
         }
 
         uint256 _currentDebt = balanceOfDebt();
-        uint256 _newCollateral = _lockedCollateral().sub(amountToFree);
-        uint256 _targetDebt = _newCollateral.mul(getIssuanceRatio()).div(1e18);
+        uint256 _newCollateral = _lockedCollateral().sub(amountToFree); // in want (SNX)
+        uint256 _targetDebt =
+            wantToSUSD(_newCollateral).mul(getIssuanceRatio()).div(1e18); // in sUSD
         // NOTE: _newCollateral will always be < _lockedCollateral() so _targetDebt will always be < _currentDebt
         uint256 _amountToRepay = _currentDebt.sub(_targetDebt);
 
