@@ -3,7 +3,6 @@ from brownie import Wei
 
 
 def test_router(vault, strategy, susd, susd_whale):
-
     assert vault.strategies(strategy).dict()["totalGain"] == 0
 
     # Shouldn't be able to set the router to a random address

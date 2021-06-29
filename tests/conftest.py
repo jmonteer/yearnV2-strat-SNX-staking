@@ -119,7 +119,7 @@ def snx_oracle(gov, accounts, SnxOracle, interface):
 
 @pytest.fixture
 def susd_vault(accounts):
-    vault = Contract("0xa5cA62D95D24A4a350983D5B8ac4EB8638887396")
+    vault = Contract("0xcE0F1Ef5aAAB82547acc699d3Ab93c069bb6e547")
     susd_gov = accounts.at(vault.governance(), force=True)
     vault.setDepositLimit(2 ** 256 - 1, {"from": susd_gov})
     yield vault
