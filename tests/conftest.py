@@ -90,10 +90,10 @@ def snx_whale(accounts):
 
 
 @pytest.fixture
-def snx_oracle(gov, accounts, SnxOracle):
-    exchange_rate = Contract("0xd69b189020EF614796578AfE4d10378c5e7e1138")
+def snx_oracle(gov, accounts, SnxOracle, interface):
+    exchange_rate = interface.IExchangeRates("0xd69b189020EF614796578AfE4d10378c5e7e1138")
     er_gov = accounts.at(exchange_rate.owner(), force=True)
-    new_oracle = gov.deploy(SnxOracle, "0xd69b189020EF614796578AfE4d10378c5e7e1138")
+    new_oracle = gov.deploy(SnxOracle, exchange_rate)
     exchange_rate.setOracle(new_oracle, {"from": er_gov})
 
     if (
