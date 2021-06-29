@@ -15,6 +15,7 @@ def test_happy_path(
     snx_whale,
     bob,
     snx_oracle,
+    debt_cache
 ):
     chain.snapshot()
     # Move stale period to 6 days
@@ -47,7 +48,7 @@ def test_happy_path(
     chain.mine(1)
 
     # This is extremely slow
-    # debtCache.takeDebtSnapshot({"from": debtCache.owner()})
+    debt_cache.takeDebtSnapshot({"from": debt_cache.owner()})
 
     # Donate some sUSD to the susd_vault to mock earnings and harvest profit
     susd.transfer(susd_vault, Wei("1000 ether"), {"from": susd_whale})

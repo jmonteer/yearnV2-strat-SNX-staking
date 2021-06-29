@@ -15,6 +15,7 @@ def test_snx_price_decreases(
     snx_whale,
     bob,
     snx_oracle,
+    debt_cache
 ):
     chain.snapshot()
     # Move stale period to 6 days
@@ -32,14 +33,13 @@ def test_snx_price_decreases(
     # Invest with an SNX price of 20
     snx_oracle.updateSnxPrice(Wei("20 ether"), {"from": gov})
     strategy.harvest({"from": gov})
-
+    debt_cache.takeDebtSnapshot({'from': debt_cache.owner()})
     chain.sleep(86400 + 1)  # just over 24h
     chain.mine()
 
     assert strategy.balanceOfWant() == Wei("1000 ether")
     assert strategy.balanceOfSusd() == 0
-    assert strategy.balanceOfSusdInVault() == Wei("4000 ether")
-
+    assert strategy.balanceOfSusdInVault() > 0
     previous_want = strategy.balanceOfWant()
 
     snx_oracle.updateSnxPrice(Wei("18 ether"), {"from": gov})
@@ -56,6 +56,7 @@ def test_snx_price_decreases(
     previous_vault_balance = strategy.balanceOfSusdInVault()
 
     strategy.harvest({"from": gov})
+    debt_cache.takeDebtSnapshot({'from': debt_cache.owner()})
     chain.sleep(86400 + 1)  # just over 24h
     chain.mine()
 
@@ -72,6 +73,7 @@ def test_snx_price_decreases(
     previous_debt = strategy.balanceOfDebt()
 
     strategy.harvest({"from": gov})
+    debt_cache.takeDebtSnapshot({'from': debt_cache.owner()})
     chain.sleep(86400 + 1)  # just over 24h
     chain.mine()
     assert previous_debt > strategy.balanceOfDebt()
@@ -107,6 +109,7 @@ def test_snx_price_increases(
     snx_whale,
     bob,
     snx_oracle,
+    debt_cache
 ):
     chain.snapshot()
     # Move stale period to 6 days
@@ -124,7 +127,7 @@ def test_snx_price_increases(
     # Invest with an SNX price of 20
     snx_oracle.updateSnxPrice(Wei("20 ether"), {"from": gov})
     strategy.harvest({"from": gov})
-
+    debt_cache.takeDebtSnapshot({'from': debt_cache.owner()})
     chain.sleep(86400 + 1)  # just over 24h
     chain.mine()
 
@@ -148,6 +151,7 @@ def test_snx_price_increases(
     previous_vault_balance = strategy.balanceOfSusdInVault()
 
     strategy.harvest({"from": gov})
+    debt_cache.takeDebtSnapshot({'from': debt_cache.owner()})
     chain.sleep(86400 + 1)  # just over 24h
     chain.mine()
 

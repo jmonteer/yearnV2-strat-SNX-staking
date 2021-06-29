@@ -557,6 +557,31 @@ contract Strategy is BaseStrategy {
     }
 
     // ********************** CALCS **********************
+    function ethToWant(uint256 _amtInWei)
+        public
+        view
+        override
+        returns (uint256)
+    {
+        if (_amtInWei == 0) {
+            return 0;
+        }
+        address[] memory path = new address[](2);
+        path[0] = address(want);
+        path[1] = address(WETH);
+
+        uint256[] memory amounts = router.getAmountsOut(_amtInWei, path);
+        return amounts[amounts.length - 1];
+    }
+
+    function liquidateAllPositions()
+        internal
+        override
+        returns (uint256 _amountFreed)
+    {
+        // NOTE: we try to unlock all of the collateral in the strategy (which should be == totalDebt)
+        (_amountFreed, ) = liquidatePosition(balanceOfWant());
+    }
 
     function estimatedProfit() public view returns (uint256) {
         uint256 availableFees; // in sUSD

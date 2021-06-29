@@ -15,6 +15,7 @@ def test_emergency_exit(
     snx_whale,
     bob,
     snx_oracle,
+    debt_cache
 ):
     chain.snapshot()
     # Move stale period to 6 days
@@ -33,6 +34,9 @@ def test_emergency_exit(
     # Invest with an SNX price of 20
     snx_oracle.updateSnxPrice(Wei("20 ether"), {"from": gov})
     strategy.harvest({"from": gov})
+    # to avoid bug
+    debtCache = Contract(resolver.getAddress(encode_single("bytes32", b"DebtCache")))
+    debtCache.takeDebtSnapshot({"from": debtCache.owner()})
     assert strategy.balanceOfWant() == Wei("1000 ether")
     assert strategy.balanceOfSusd() == 0
     assert strategy.balanceOfSusdInVault() > 0
@@ -44,7 +48,6 @@ def test_emergency_exit(
 
     strategy.setEmergencyExit({"from": gov})
     strategy.harvest({"from": gov})
-
     assert strategy.estimatedTotalAssets() == 0
     assert snx.balanceOf(vault) == Wei("1000 ether")
     assert vault.strategies(strategy).dict()["totalDebt"] == 0
