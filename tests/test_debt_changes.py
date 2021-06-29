@@ -3,6 +3,7 @@ from brownie import Wei, Contract
 from eth_abi import encode_single
 import pytest
 
+
 def test_debt_increases(
     snx,
     chain,

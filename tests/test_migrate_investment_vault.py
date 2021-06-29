@@ -19,7 +19,7 @@ def test_migrate_investment_vault(
     pm,
     rewards,
     management,
-    debt_cache
+    debt_cache,
 ):
     chain.snapshot()
     # Move stale period to 16 days
@@ -37,7 +37,7 @@ def test_migrate_investment_vault(
     # Invest with an SNX price of 20
     snx_oracle.updateSnxPrice(Wei("20 ether"), {"from": gov})
     strategy.harvest({"from": gov})
-    debt_cache.takeDebtSnapshot({'from': debt_cache.owner()})
+    debt_cache.takeDebtSnapshot({"from": debt_cache.owner()})
     chain.sleep(86400 + 1)  # just over 24h
     chain.mine()
 

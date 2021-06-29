@@ -15,7 +15,7 @@ def test_liquidations_snx_price_change(
     snx_whale,
     bob,
     snx_oracle,
-    debt_cache
+    debt_cache,
 ):
     chain.snapshot()
     # Move stale period to 6 days
@@ -91,7 +91,7 @@ def test_liquidations_debt_changes(
     snx_whale,
     bob,
     snx_oracle,
-    debt_cache
+    debt_cache,
 ):
     chain.snapshot()
     # Move stale period to 16 days

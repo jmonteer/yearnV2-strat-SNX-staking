@@ -139,6 +139,7 @@ def vault(pm, gov, rewards, guardian, management, token):
 def resolver(strategy):
     yield Contract(strategy.resolver())
 
+
 @pytest.fixture
 def debt_cache(resolver):
     debtCache = Contract(resolver.getAddress(encode_single("bytes32", b"DebtCache")))
@@ -150,6 +151,7 @@ def debt_cache(resolver):
             "Failed. This is expected due to timeout but it is useful to cache, next call will go through"
         )
     yield debtCache
+
 
 @pytest.fixture
 def strategy(strategist, keeper, vault, Strategy, gov, susd_vault):

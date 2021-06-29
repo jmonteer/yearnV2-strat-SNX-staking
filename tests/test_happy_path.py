@@ -15,7 +15,7 @@ def test_happy_path(
     snx_whale,
     bob,
     snx_oracle,
-    debt_cache
+    debt_cache,
 ):
     chain.snapshot()
     # Move stale period to 6 days
