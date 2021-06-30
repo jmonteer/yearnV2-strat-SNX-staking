@@ -1,5 +1,6 @@
 from brownie import Wei, Contract
 from eth_abi import encode_single
+from utils import accumulate_fees
 
 
 def test_snx_rewards(

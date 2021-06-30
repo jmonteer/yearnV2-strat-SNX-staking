@@ -146,7 +146,7 @@ contract Strategy is BaseStrategy {
 
     function estimatedTotalAssets() public view override returns (uint256) {
         uint256 totalAssets =
-            balanceOfWant().add(estimatedProfit()).add(
+            balanceOfWant().add(
                 sUSDToWant(balanceOfSusdInVault().add(balanceOfSusd()))
             );
         uint256 totalLiabilities = sUSDToWant(balanceOfDebt());

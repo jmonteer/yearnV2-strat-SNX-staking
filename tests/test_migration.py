@@ -1,5 +1,6 @@
 from brownie import Contract
 from eth_abi import encode_single
+from utils import accumulate_fees
 
 
 def test_migration(
@@ -19,13 +20,14 @@ def test_migration(
     settings = Contract(
         resolver.getAddress(encode_single("bytes32", b"SystemSettings"))
     )
-    settings.setRateStalePeriod(24 * 3600 * 6, {"from": settings.owner()})
-    settings.setDebtSnapshotStaleTime(24 * 3600 * 6, {"from": settings.owner()})
+    settings.setRateStalePeriod(24 * 3600 * 30, {"from": settings.owner()})
+    settings.setDebtSnapshotStaleTime(24 * 3600 * 30, {"from": settings.owner()})
 
     # Deposit to the vault and harvest
     token.approve(vault, amount, {"from": gov})
     vault.deposit(amount, {"from": gov})
     strategy.harvest({"from": gov})
+    accumulate_fees(strategy)
     debt_cache.takeDebtSnapshot({"from": debt_cache.owner()})
     assert token.balanceOf(strategy) == amount
 

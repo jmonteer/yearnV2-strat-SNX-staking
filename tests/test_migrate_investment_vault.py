@@ -1,6 +1,7 @@
 import brownie
 from brownie import Wei, Contract, config
 from eth_abi import encode_single
+from utils import accumulate_fees
 
 
 def test_migrate_investment_vault(
@@ -26,8 +27,8 @@ def test_migrate_investment_vault(
     settings = Contract(
         resolver.getAddress(encode_single("bytes32", b"SystemSettings"))
     )
-    settings.setRateStalePeriod(24 * 3600 * 16, {"from": settings.owner()})
-    settings.setDebtSnapshotStaleTime(24 * 3600 * 16, {"from": settings.owner()})
+    settings.setRateStalePeriod(24 * 3600 * 30, {"from": settings.owner()})
+    settings.setDebtSnapshotStaleTime(24 * 3600 * 30, {"from": settings.owner()})
 
     snx.transfer(bob, Wei("1000 ether"), {"from": snx_whale})
     snx.approve(vault, 2 ** 256 - 1, {"from": bob})
@@ -36,6 +37,7 @@ def test_migrate_investment_vault(
     # Invest with an SNX price of 20
     snx_oracle.updateSnxPrice(Wei("20 ether"), {"from": gov})
     strategy.harvest({"from": gov})
+    accumulate_fees(strategy)
     debt_cache.takeDebtSnapshot({"from": debt_cache.owner()})
     chain.sleep(86400 + 1)  # just over 24h
     chain.mine()

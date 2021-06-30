@@ -1,5 +1,6 @@
 import brownie
 from brownie import Wei
+from utils import accumulate_fees
 
 
 def test_router(vault, strategy, susd, susd_whale):

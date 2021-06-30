@@ -2,6 +2,7 @@ import brownie
 from brownie import Wei, Contract
 from eth_abi import encode_single
 
+from utils import accumulate_fees
 
 def test_emergency_exit(
     chain,
@@ -22,8 +23,8 @@ def test_emergency_exit(
     settings = Contract(
         resolver.getAddress(encode_single("bytes32", b"SystemSettings"))
     )
-    settings.setRateStalePeriod(24 * 3600 * 6, {"from": settings.owner()})
-    settings.setDebtSnapshotStaleTime(24 * 3600 * 6, {"from": settings.owner()})
+    settings.setRateStalePeriod(24 * 3600 * 30, {"from": settings.owner()})
+    settings.setDebtSnapshotStaleTime(24 * 3600 * 30, {"from": settings.owner()})
 
     # Do the first deposit
     snx.transfer(bob, Wei("1000 ether"), {"from": snx_whale})
@@ -33,6 +34,7 @@ def test_emergency_exit(
     # Invest with an SNX price of 20
     snx_oracle.updateSnxPrice(Wei("20 ether"), {"from": gov})
     strategy.harvest({"from": gov})
+    fees = accumulate_fees(strategy)
     # to avoid bug
     debtCache = Contract(resolver.getAddress(encode_single("bytes32", b"DebtCache")))
     debtCache.takeDebtSnapshot({"from": debtCache.owner()})
