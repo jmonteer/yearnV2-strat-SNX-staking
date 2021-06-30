@@ -536,8 +536,10 @@ contract Strategy is BaseStrategy {
             _amount > balanceOfSusdInVault() ||
             balanceOfSusdInVault().sub(_amount) <= MIN_ISSUE
         ) {
+            // NOTE: maxLoss can be set to a higher value to be able to withdraw from lossy vault
             susdVault.withdraw(susdVault.balanceOf(), address(this), maxLoss);
         } else {
+            // NOTE: maxLoss can be set to a higher value to be able to withdraw from lossy vault
             uint256 _sharesToWithdraw =
                 _amount.mul(1e18).div(susdVault.pricePerShare());
             susdVault.withdraw(_sharesToWithdraw, address(this), maxLoss);
