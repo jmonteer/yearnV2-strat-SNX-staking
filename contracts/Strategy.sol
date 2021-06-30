@@ -283,16 +283,10 @@ contract Strategy is BaseStrategy {
             return;
         }
         uint256 _currentDebt = balanceOfDebt();
-        uint256 _newCollateral = _lockedCollateral().sub(amountToFree); // in want (SNX)
-        uint256 _targetDebt;
-        // NOTE: if the collateral left is the escrowed SNX we need to repay full debt, in order to be able to transfer balance in Strategy
-        if (_newCollateral <= balanceOfEscrowedWant()) {
-            _targetDebt = 0; // in sUSD
-        } else {
-            _targetDebt = wantToSUSD(_newCollateral)
-                .mul(getIssuanceRatio())
-                .div(1e18); // in sUSD
-        }
+        uint256 _newCollateral = balanceOfWant().sub(amountToFree); // in want (SNX)
+        uint256 _targetDebt =
+            wantToSUSD(_newCollateral).mul(getIssuanceRatio()).div(1e18); // in sUSD
+
         // NOTE: _newCollateral will always be < _lockedCollateral() so _targetDebt will always be < _currentDebt
         uint256 _amountToRepay = _currentDebt.sub(_targetDebt);
 
