@@ -31,7 +31,7 @@ contract Strategy is BaseStrategy {
     uint256 public ratioThreshold = 1e15;
     uint256 public constant MAX_RATIO = type(uint256).max;
     uint256 public constant MAX_BPS = 10_000;
-
+    uint256 public maxLoss = 1;
     address public constant susd =
         address(0x57Ab1ec28D129707052df4dF418D58a2D46d5f51);
     IReadProxy public constant readProxy =
@@ -108,6 +108,14 @@ contract Strategy is BaseStrategy {
         targetRatioMultiplier = _targetRatioMultiplier;
     }
 
+    function setMaxLoss(uint256 _maxLoss) external {
+        require(
+            msg.sender == governance() ||
+                msg.sender == VaultAPI(address(vault)).management()
+        );
+        maxLoss = _maxLoss;
+    }
+
     function setRatioThreshold(uint256 _ratioThreshold) external {
         require(
             msg.sender == governance() ||
@@ -117,7 +125,7 @@ contract Strategy is BaseStrategy {
     }
 
     // This method is used to migrate the vault where we deposit the sUSD for yield. It should be rarely used
-    function migrateSusdVault(IVault newSusdVault, uint256 maxLoss)
+    function migrateSusdVault(IVault newSusdVault, uint256 _maxLoss)
         external
         onlyGovernance
     {
@@ -126,7 +134,7 @@ contract Strategy is BaseStrategy {
         susdVault.withdraw(
             susdVault.balanceOf(address(this)),
             address(this),
-            maxLoss
+            _maxLoss
         );
         IERC20(susd).safeApprove(address(susdVault), 0);
 
@@ -528,11 +536,11 @@ contract Strategy is BaseStrategy {
             _amount > balanceOfSusdInVault() ||
             balanceOfSusdInVault().sub(_amount) <= MIN_ISSUE
         ) {
-            susdVault.withdraw();
+            susdVault.withdraw(susdVault.balanceOf(), address(this), maxLoss);
         } else {
             uint256 _sharesToWithdraw =
                 _amount.mul(1e18).div(susdVault.pricePerShare());
-            susdVault.withdraw(_sharesToWithdraw);
+            susdVault.withdraw(_sharesToWithdraw, address(this), maxLoss);
         }
     }
 
