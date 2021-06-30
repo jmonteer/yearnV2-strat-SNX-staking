@@ -17,7 +17,6 @@ def test_liquidations_snx_price_change(
     snx_oracle,
     debt_cache,
 ):
-    chain.snapshot()
     # Move stale period to 6 days
     resolver = Contract(strategy.resolver())
     settings = Contract(
@@ -76,7 +75,6 @@ def test_liquidations_snx_price_change(
         < Wei("1000 ether") - snx.balanceOf(bob)
         < amount_needed * 11 / 70 * 1.001
     )  # the losses where correctly calculated
-    chain.revert()
 
 
 def test_liquidations_debt_changes(
@@ -93,7 +91,6 @@ def test_liquidations_debt_changes(
     snx_oracle,
     debt_cache,
 ):
-    chain.snapshot()
     # Move stale period to 16 days
     resolver = Contract(strategy.resolver())
     settings = Contract(
@@ -169,5 +166,3 @@ def test_liquidations_debt_changes(
         < Wei("1000 ether") - snx.balanceOf(bob)
         < amount_needed * 11 / 200 * 1.001
     )  # the losses where correctly calculated
-
-    chain.revert()

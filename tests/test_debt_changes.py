@@ -17,7 +17,6 @@ def test_debt_increases(
     bob,
     snx_oracle,
 ):
-    chain.snapshot()
     # Move stale period to 6 days
     resolver = Contract(strategy.resolver())
     settings = Contract(
@@ -110,7 +109,6 @@ def test_debt_increases(
 
     # bob lost SNX
     assert snx.balanceOf(bob) < Wei("1000 ether")
-    chain.revert()
 
 
 def test_debt_decreases(
@@ -126,7 +124,6 @@ def test_debt_decreases(
     bob,
     snx_oracle,
 ):
-    chain.snapshot()
 
     # Move stale period to 6 days
     resolver = Contract(strategy.resolver())
@@ -198,4 +195,3 @@ def test_debt_decreases(
 
     # bob earned SNX
     assert snx.balanceOf(bob) > Wei("1000 ether")
-    chain.revert()

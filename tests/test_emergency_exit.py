@@ -17,7 +17,6 @@ def test_emergency_exit(
     snx_oracle,
     debt_cache,
 ):
-    chain.snapshot()
     # Move stale period to 6 days
     resolver = Contract(strategy.resolver())
     settings = Contract(
@@ -51,4 +50,3 @@ def test_emergency_exit(
     assert strategy.estimatedTotalAssets() == 0
     assert snx.balanceOf(vault) == Wei("1000 ether")
     assert vault.strategies(strategy).dict()["totalDebt"] == 0
-    chain.revert()

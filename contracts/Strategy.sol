@@ -269,7 +269,8 @@ contract Strategy is BaseStrategy {
     }
 
     function prepareMigration(address _newStrategy) internal override {
-        liquidatePosition(vault.strategies(address(this)).totalDebt);
+        // totalDebt is 0 at this point
+        liquidatePosition(balanceOfWant());
     }
 
     // ********************** OPERATIONS FUNCTIONS **********************
@@ -289,6 +290,12 @@ contract Strategy is BaseStrategy {
         // NOTE: _newCollateral will always be < _lockedCollateral() so _targetDebt will always be < _currentDebt
         uint256 _amountToRepay = _currentDebt.sub(_targetDebt);
 
+        // TODO: add threshold?
+        if (_newCollateral <= balanceOfEscrowedWant()) {
+            // this means that we want to unlock
+            // NOTE: we repay only enough to unlock the max amount available. we keep the debt against escrowed collateral (if any)
+            _amountToRepay = wantToSUSD(_unlockableWant());
+        }
         repayDebt(_amountToRepay);
     }
 
@@ -358,7 +365,7 @@ contract Strategy is BaseStrategy {
             burnSusd(amountToRepay.sub(repaidAmount)); // this method is subject to minimumStakePeriod (see Synthetix docs)
             repaidAmount = amountToRepay;
         }
-        emit RepayDebt(repaidAmount, _debtBalance.sub(repaidAmount));
+        emit RepayDebt(repaidAmount, balanceOfDebt());
     }
 
     // two profit sources: Synthetix protocol and Yearn sUSD Vault

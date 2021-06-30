@@ -3,9 +3,17 @@ from eth_abi import encode_single
 
 
 def test_migration(
-    token, vault, strategy, amount, Strategy, strategist, gov, susd_vault, chain
+    token,
+    vault,
+    strategy,
+    amount,
+    Strategy,
+    strategist,
+    gov,
+    susd_vault,
+    chain,
+    debt_cache,
 ):
-    chain.snapshot()
     # Move stale period to 6 days
     resolver = Contract(strategy.resolver())
     settings = Contract(
@@ -18,6 +26,7 @@ def test_migration(
     token.approve(vault, amount, {"from": gov})
     vault.deposit(amount, {"from": gov})
     strategy.harvest({"from": gov})
+    debt_cache.takeDebtSnapshot({"from": debt_cache.owner()})
     assert token.balanceOf(strategy) == amount
 
     # sleep for 24h to be able to burn synths
@@ -26,6 +35,5 @@ def test_migration(
 
     # migrate to a new strategy
     new_strategy = strategist.deploy(Strategy, vault, susd_vault)
-    strategy.migrate(new_strategy, {"from": gov})
+    vault.migrateStrategy(strategy, new_strategy, {"from": gov})
     assert token.balanceOf(new_strategy) == amount
-    chain.revert()

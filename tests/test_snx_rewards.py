@@ -14,8 +14,8 @@ def test_snx_rewards(
     snx_whale,
     bob,
     snx_oracle,
+    debt_cache,
 ):
-    chain.snapshot()
     # Move stale period to 30 days
     resolver = Contract(strategy.resolver())
     settings = Contract(
@@ -31,7 +31,9 @@ def test_snx_rewards(
 
     # Invest with an SNX price of 20
     snx_oracle.updateSnxPrice(Wei("20 ether"), {"from": gov})
+
     strategy.harvest({"from": gov})
+    debt_cache.takeDebtSnapshot({"from": debt_cache.owner()})
     assert strategy.balanceOfWant() == Wei("1000 ether")
     assert strategy.balanceOfSusd() == 0
     assert strategy.balanceOfSusdInVault() > 0
@@ -50,6 +52,8 @@ def test_snx_rewards(
     previous_escrowed_want = strategy.balanceOfEscrowedWant()
 
     strategy.harvest({"from": gov})
+    debt_cache.takeDebtSnapshot({"from": debt_cache.owner()})
+
     chain.sleep(60 * 60 * 8)  # Sleep 8 hours
     chain.mine(1)
 
@@ -63,12 +67,12 @@ def test_snx_rewards(
     )  # fees sold for Want and have been taken as gain
 
     strategy.harvest({"from": gov})
-    chain.sleep(60 * 60 * 8)  # Sleep 8 hours
+    debt_cache.takeDebtSnapshot({"from": debt_cache.owner()})
+
+    chain.sleep(60 * 60 * 24)  # Sleep 24 hours
     chain.mine(1)
 
     vault.withdraw({"from": bob})
     assert strategy.balanceOfSusd() == 0
     assert strategy.balanceOfSusdInVault() == 0
     assert strategy.balanceOfWant() == 0
-
-    chain.revert()

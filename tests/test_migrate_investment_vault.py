@@ -21,7 +21,6 @@ def test_migrate_investment_vault(
     management,
     debt_cache,
 ):
-    chain.snapshot()
     # Move stale period to 16 days
     resolver = Contract(strategy.resolver())
     settings = Contract(
@@ -65,4 +64,3 @@ def test_migrate_investment_vault(
     assert snx.balanceOf(vault) == 0
     assert vault.balanceOf(bob) == 0
     assert snx.balanceOf(bob) == Wei("1000 ether")
-    chain.revert()

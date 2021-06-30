@@ -5,8 +5,7 @@ from eth_abi import encode_single
 import datetime
 
 
-def test_debt_simulator(snx, susd, susd_whale, snx_whale, snx_oracle, bob, gov):
-    chain.snapshot()
+def test_debt_simulator(snx, susd, susd_whale, snx_whale, snx_oracle, bob, gov, vault):
     beginning = datetime.datetime.now()
     print(datetime.datetime.now())
     resolver = Contract("0x823bE81bbF96BEc0e25CA13170F5AaCb5B79ba83")
@@ -132,4 +131,3 @@ def test_debt_simulator(snx, susd, susd_whale, snx_whale, snx_oracle, bob, gov):
     print()
     print(datetime.datetime.now())
     print(datetime.datetime.now() - beginning)
-    chain.revert()

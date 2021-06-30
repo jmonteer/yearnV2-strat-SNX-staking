@@ -17,7 +17,6 @@ def test_happy_path(
     snx_oracle,
     debt_cache,
 ):
-    chain.snapshot()
     # Move stale period to 6 days
     resolver = Contract(strategy.resolver())
     settings = Contract(
@@ -63,4 +62,3 @@ def test_happy_path(
 
     assert snx.balanceOf(bob) > Wei("1000 ether")
     assert strategy.balanceOfDebt() == 0
-    chain.revert()
