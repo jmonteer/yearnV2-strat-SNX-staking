@@ -362,8 +362,10 @@ contract Strategy is BaseStrategy {
 
         // repay sUSD debt by burning the synth
         if (amountToRepay > repaidAmount) {
-            burnSusd(amountToRepay.sub(repaidAmount)); // this method is subject to minimumStakePeriod (see Synthetix docs)
-            repaidAmount = amountToRepay;
+            if (burnSusd(amountToRepay.sub(repaidAmount))) {
+                // this method is subject to minimumStakePeriod (see Synthetix docs)
+                repaidAmount = amountToRepay;
+            }
         }
         emit RepayDebt(repaidAmount, balanceOfDebt());
     }
