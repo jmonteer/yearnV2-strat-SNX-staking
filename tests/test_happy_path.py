@@ -53,7 +53,7 @@ def test_happy_path(
     debt_cache.takeDebtSnapshot({"from": debt_cache.owner()})
 
     # Donate some sUSD to the susd_vault to mock earnings and harvest profit
-    susd.transfer(susd_vault, Wei("1000 ether"), {"from": susd_whale})
+    susd.transfer(susd_vault, Wei("10 ether"), {"from": susd_whale})
     strategy.harvest({"from": gov})
     assert vault.strategies(strategy).dict()["totalGain"] > 0
 

@@ -83,6 +83,10 @@ contract Strategy is BaseStrategy {
         // To exchange SNX for sUSD
         IERC20(want).safeApprove(address(uniswap), type(uint256).max);
         IERC20(want).safeApprove(address(sushiswap), type(uint256).max);
+
+        // healthcheck
+        healthCheck = 0xDDCea799fF1699e98EDF118e0629A974Df7DF012;
+        doHealthCheck = true;
     }
 
     // ********************** SETTERS **********************
