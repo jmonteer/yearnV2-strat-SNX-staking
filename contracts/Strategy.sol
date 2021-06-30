@@ -589,7 +589,7 @@ contract Strategy is BaseStrategy {
         returns (uint256 _amountFreed)
     {
         // NOTE: we try to unlock all of the collateral in the strategy (which should be == totalDebt)
-        (_amountFreed, ) = liquidatePosition(balanceOfWant());
+        (_amountFreed, ) = liquidatePosition(vault.debtOutstanding());
     }
 
     function estimatedProfit() public view returns (uint256) {
