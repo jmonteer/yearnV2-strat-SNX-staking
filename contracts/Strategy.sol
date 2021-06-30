@@ -162,6 +162,10 @@ contract Strategy is BaseStrategy {
                 : 0;
     }
 
+    function delegatedAssets() external view override returns (uint256) {
+        return sUSDToWant(balanceOfSusdInVault());
+    }
+
     function prepareReturn(uint256 _debtOutstanding)
         internal
         override
@@ -602,6 +606,7 @@ contract Strategy is BaseStrategy {
 
     function getTargetDebt(uint256 _targetCollateral)
         internal
+        view
         returns (uint256)
     {
         uint256 _targetRatio = getTargetRatio();
