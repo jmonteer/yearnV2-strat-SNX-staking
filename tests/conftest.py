@@ -118,7 +118,7 @@ def snx_oracle(gov, accounts, SnxOracle, interface):
 
 
 @pytest.fixture
-def susd_vault(accounts, clean):
+def susd_vault(accounts):
     vault = Contract("0xcE0F1Ef5aAAB82547acc699d3Ab93c069bb6e547")
     susd_gov = accounts.at(vault.governance(), force=True)
     vault.setDepositLimit(2 ** 256 - 1, {"from": susd_gov})
@@ -126,7 +126,7 @@ def susd_vault(accounts, clean):
 
 
 @pytest.fixture
-def vault(pm, gov, rewards, guardian, management, token, clean):
+def vault(pm, gov, rewards, guardian, management, token):
     Vault = pm(config["dependencies"][0]).Vault
     vault = guardian.deploy(Vault)
     vault.initialize(token, gov, rewards, "", "", guardian)
@@ -161,10 +161,3 @@ def strategy(strategist, keeper, vault, Strategy, gov, susd_vault):
     strategy.setKeeper(keeper)
     vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
     yield strategy
-
-
-@pytest.fixture
-def clean(chain):
-    chain.snapshot()
-    yield
-    chain.revert()
