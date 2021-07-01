@@ -1,4 +1,3 @@
-import brownie
 from brownie import Contract, Wei
 from eth_abi import encode_single
 
