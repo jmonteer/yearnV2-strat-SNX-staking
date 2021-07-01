@@ -3,7 +3,8 @@ from brownie import Contract, Wei
 from eth_abi import encode_single
 
 
-def test_lossy_vault(chain,
+def test_lossy_vault(
+    chain,
     gov,
     vault,
     strategy,
@@ -31,22 +32,22 @@ def test_lossy_vault(chain,
     # Invest with an SNX price of 20
     snx_oracle.updateSnxPrice(Wei("20 ether"), {"from": gov})
     strategy.harvest({"from": gov})
-    strategy.setDoHealthCheck(False, {'from': vault.governance()})
+    strategy.setDoHealthCheck(False, {"from": vault.governance()})
     chain.sleep(24 * 3600)
     chain.mine(1)
 
     susd_router = Contract(susd_vault.withdrawalQueue(0))
-    susd_router.harvest({'from': susd_router.strategist()})
+    susd_router.harvest({"from": susd_router.strategist()})
     susd042 = Contract(susd_router.yVault())
 
-    susd.transfer(susd_whale, Wei("1000 ether"), {'from': susd042})
+    susd.transfer(susd_whale, Wei("1000 ether"), {"from": susd042})
 
-    vault.updateStrategyDebtRatio(strategy, 0, {'from': vault.governance()})
-    strategy.setMaxLoss(0, {'from': gov})
+    vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
+    strategy.setMaxLoss(0, {"from": gov})
     with brownie.reverts():
-        strategy.harvest({'from': gov})
+        strategy.harvest({"from": gov})
 
     chain.sleep(24 * 3600)
     chain.mine()
-    strategy.setMaxLoss(10_000, {'from': gov})
-    strategy.harvest({'from': gov})
+    strategy.setMaxLoss(10_000, {"from": gov})
+    strategy.harvest({"from": gov})

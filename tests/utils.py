@@ -1,5 +1,7 @@
 from brownie import chain, Contract
 from eth_abi import encode_single
+
+
 def accumulate_fees(strategy):
     resolver = Contract(strategy.resolver())
     # We don't have any reward because the period is not over yet

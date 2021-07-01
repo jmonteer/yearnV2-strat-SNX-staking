@@ -4,6 +4,8 @@ from eth_abi import encode_single
 import pytest
 
 from utils import accumulate_fees
+
+
 def test_debt_increases(
     snx,
     chain,

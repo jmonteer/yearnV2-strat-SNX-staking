@@ -4,6 +4,7 @@ from eth_abi import encode_single
 
 from utils import accumulate_fees
 
+
 def test_emergency_exit(
     chain,
     gov,
