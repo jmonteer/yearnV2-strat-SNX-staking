@@ -33,16 +33,15 @@ def test_lossy_vault(chain,
     strategy.harvest({"from": gov})
     strategy.setDoHealthCheck(False, {'from': vault.governance()})
     chain.sleep(24 * 3600)
-    chain.mine()
+    chain.mine(1)
 
     susd_router = Contract(susd_vault.withdrawalQueue(0))
     susd_router.harvest({'from': susd_router.strategist()})
     susd042 = Contract(susd_router.yVault())
+
     susd.transfer(susd_whale, Wei("1000 ether"), {'from': susd042})
 
-    susd.transfer(susd_whale, Wei("100 ether"), {'from': susd_vault})
-    # to force reducing debt
-    vault.updateStrategyDebtRatio(strategy, 5_000, {'from': vault.governance()})
+    vault.updateStrategyDebtRatio(strategy, 0, {'from': vault.governance()})
     strategy.setMaxLoss(0, {'from': gov})
     with brownie.reverts():
         strategy.harvest({'from': gov})
@@ -51,4 +50,3 @@ def test_lossy_vault(chain,
     chain.mine()
     strategy.setMaxLoss(10_000, {'from': gov})
     strategy.harvest({'from': gov})
-    assert False
