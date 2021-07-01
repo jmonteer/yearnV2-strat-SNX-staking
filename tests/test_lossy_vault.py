@@ -1,11 +1,8 @@
-import brownie
-from brownie import Wei, Contract
+from brownie import Contract, Wei
 from eth_abi import encode_single
 
-from utils import accumulate_fees
 
-
-def test_emergency_exit(
+def test_lossy_vault(
     chain,
     gov,
     vault,
@@ -31,25 +28,25 @@ def test_emergency_exit(
     snx.transfer(bob, Wei("1000 ether"), {"from": snx_whale})
     snx.approve(vault, 2 ** 256 - 1, {"from": bob})
     vault.deposit({"from": bob})
-
     # Invest with an SNX price of 20
     snx_oracle.updateSnxPrice(Wei("20 ether"), {"from": gov})
     strategy.harvest({"from": gov})
-    fees = accumulate_fees(strategy)
-    # to avoid bug
-    debtCache = Contract(resolver.getAddress(encode_single("bytes32", b"DebtCache")))
-    debtCache.takeDebtSnapshot({"from": debtCache.owner()})
-    assert strategy.balanceOfWant() == Wei("1000 ether")
-    assert strategy.balanceOfSusd() == 0
-    assert strategy.balanceOfSusdInVault() > 0
-
-    # We need to wait 24hs to be able to burn synths
-    # Always takeDebtSnapshot after moving time.
-    chain.sleep(86401)
+    strategy.setDoHealthCheck(False, {"from": vault.governance()})
+    chain.sleep(24 * 3600)
     chain.mine(1)
 
-    strategy.setEmergencyExit({"from": gov})
+    susd_router = Contract(susd_vault.withdrawalQueue(0))
+    susd_router.harvest({"from": susd_router.strategist()})
+    susd042 = Contract(susd_router.yVault())
+
+    susd.transfer(susd_whale, Wei("1000 ether"), {"from": susd042})
+
+    vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
+    strategy.setMaxLoss(0, {"from": gov})
+    with brownie.reverts():
+        strategy.harvest({"from": gov})
+
+    chain.sleep(24 * 3600)
+    chain.mine()
+    strategy.setMaxLoss(10_000, {"from": gov})
     strategy.harvest({"from": gov})
-    assert strategy.estimatedTotalAssets() == 0
-    assert snx.balanceOf(vault) == Wei("1000 ether")
-    assert vault.strategies(strategy).dict()["totalDebt"] == 0

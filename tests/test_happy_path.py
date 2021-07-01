@@ -1,6 +1,7 @@
 import brownie
 from brownie import Wei, Contract
 from eth_abi import encode_single
+from utils import accumulate_fees
 
 
 def test_happy_path(
@@ -15,15 +16,15 @@ def test_happy_path(
     snx_whale,
     bob,
     snx_oracle,
+    debt_cache,
 ):
-    chain.snapshot()
     # Move stale period to 6 days
     resolver = Contract(strategy.resolver())
     settings = Contract(
         resolver.getAddress(encode_single("bytes32", b"SystemSettings"))
     )
-    settings.setRateStalePeriod(24 * 3600 * 6, {"from": settings.owner()})
-    settings.setDebtSnapshotStaleTime(24 * 3600 * 6, {"from": settings.owner()})
+    settings.setRateStalePeriod(24 * 3600 * 30, {"from": settings.owner()})
+    settings.setDebtSnapshotStaleTime(24 * 3600 * 30, {"from": settings.owner()})
 
     # Do the first deposit
     snx.transfer(bob, Wei("1000 ether"), {"from": snx_whale})
@@ -33,13 +34,15 @@ def test_happy_path(
     # Invest with an SNX price of 20
     snx_oracle.updateSnxPrice(Wei("20 ether"), {"from": gov})
     strategy.harvest({"from": gov})
-    assert strategy.balanceOfWant() == Wei("1000 ether")
-    assert strategy.balanceOfSusd() == 0
-    assert strategy.balanceOfSusdInVault() > 0
-
     # should not allow to withdraw before minimumStakePeriod ends
     with brownie.reverts():
         vault.withdraw({"from": bob})
+
+    accumulate_fees(strategy)
+
+    assert strategy.balanceOfWant() == Wei("1000 ether")
+    assert strategy.balanceOfSusd() == 0
+    assert strategy.balanceOfSusdInVault() > 0
 
     # We need to wait 24hs to be able to burn synths
     # Always takeDebtSnapshot after moving time.
@@ -47,10 +50,10 @@ def test_happy_path(
     chain.mine(1)
 
     # This is extremely slow
-    # debtCache.takeDebtSnapshot({"from": debtCache.owner()})
+    debt_cache.takeDebtSnapshot({"from": debt_cache.owner()})
 
     # Donate some sUSD to the susd_vault to mock earnings and harvest profit
-    susd.transfer(susd_vault, Wei("1000 ether"), {"from": susd_whale})
+    susd.transfer(susd_vault, Wei("10 ether"), {"from": susd_whale})
     strategy.harvest({"from": gov})
     assert vault.strategies(strategy).dict()["totalGain"] > 0
 
@@ -62,4 +65,3 @@ def test_happy_path(
 
     assert snx.balanceOf(bob) > Wei("1000 ether")
     assert strategy.balanceOfDebt() == 0
-    chain.revert()

@@ -31,7 +31,7 @@ contract Strategy is BaseStrategy {
     uint256 public ratioThreshold = 1e15;
     uint256 public constant MAX_RATIO = type(uint256).max;
     uint256 public constant MAX_BPS = 10_000;
-
+    uint256 public maxLoss = 1;
     address public constant susd =
         address(0x57Ab1ec28D129707052df4dF418D58a2D46d5f51);
     IReadProxy public constant readProxy =
@@ -83,6 +83,10 @@ contract Strategy is BaseStrategy {
         // To exchange SNX for sUSD
         IERC20(want).safeApprove(address(uniswap), type(uint256).max);
         IERC20(want).safeApprove(address(sushiswap), type(uint256).max);
+
+        // healthcheck
+        healthCheck = 0xDDCea799fF1699e98EDF118e0629A974Df7DF012;
+        doHealthCheck = true;
     }
 
     // ********************** SETTERS **********************
@@ -104,15 +108,24 @@ contract Strategy is BaseStrategy {
         targetRatioMultiplier = _targetRatioMultiplier;
     }
 
-    function setRatioThreshold(uint256 _ratioThreshold)
-        external
-        onlyStrategist
-    {
+    function setMaxLoss(uint256 _maxLoss) external {
+        require(
+            msg.sender == governance() ||
+                msg.sender == VaultAPI(address(vault)).management()
+        );
+        maxLoss = _maxLoss;
+    }
+
+    function setRatioThreshold(uint256 _ratioThreshold) external {
+        require(
+            msg.sender == governance() ||
+                msg.sender == VaultAPI(address(vault)).management()
+        );
         ratioThreshold = _ratioThreshold;
     }
 
     // This method is used to migrate the vault where we deposit the sUSD for yield. It should be rarely used
-    function migrateSusdVault(IVault newSusdVault, uint256 maxLoss)
+    function migrateSusdVault(IVault newSusdVault, uint256 _maxLoss)
         external
         onlyGovernance
     {
@@ -121,7 +134,7 @@ contract Strategy is BaseStrategy {
         susdVault.withdraw(
             susdVault.balanceOf(address(this)),
             address(this),
-            maxLoss
+            _maxLoss
         );
         IERC20(susd).safeApprove(address(susdVault), 0);
 
@@ -145,7 +158,7 @@ contract Strategy is BaseStrategy {
 
     function estimatedTotalAssets() public view override returns (uint256) {
         uint256 totalAssets =
-            balanceOfWant().add(estimatedProfit()).add(
+            balanceOfWant().add(
                 sUSDToWant(balanceOfSusdInVault().add(balanceOfSusd()))
             );
         uint256 totalLiabilities = sUSDToWant(balanceOfDebt());
@@ -155,6 +168,10 @@ contract Strategy is BaseStrategy {
             totalAssets > totalLiabilities
                 ? totalAssets.sub(totalLiabilities)
                 : 0;
+    }
+
+    function delegatedAssets() external view override returns (uint256) {
+        return sUSDToWant(balanceOfSusdInVault());
     }
 
     function prepareReturn(uint256 _debtOutstanding)
@@ -268,7 +285,8 @@ contract Strategy is BaseStrategy {
     }
 
     function prepareMigration(address _newStrategy) internal override {
-        liquidatePosition(vault.strategies(address(this)).totalDebt);
+        // totalDebt is 0 at this point
+        liquidatePosition(balanceOfWant());
     }
 
     // ********************** OPERATIONS FUNCTIONS **********************
@@ -280,10 +298,11 @@ contract Strategy is BaseStrategy {
         if (amountToFree == 0) {
             return;
         }
-
         uint256 _currentDebt = balanceOfDebt();
-        uint256 _newCollateral = _lockedCollateral().sub(amountToFree);
-        uint256 _targetDebt = _newCollateral.mul(getIssuanceRatio()).div(1e18);
+        uint256 _newCollateral = balanceOfWant().sub(amountToFree); // in want (SNX)
+        uint256 _targetDebt =
+            wantToSUSD(_newCollateral).mul(getIssuanceRatio()).div(1e18); // in sUSD
+
         // NOTE: _newCollateral will always be < _lockedCollateral() so _targetDebt will always be < _currentDebt
         uint256 _amountToRepay = _currentDebt.sub(_targetDebt);
 
@@ -353,10 +372,12 @@ contract Strategy is BaseStrategy {
 
         // repay sUSD debt by burning the synth
         if (amountToRepay > repaidAmount) {
-            burnSusd(amountToRepay.sub(repaidAmount)); // this method is subject to minimumStakePeriod (see Synthetix docs)
-            repaidAmount = amountToRepay;
+            if (burnSusd(amountToRepay.sub(repaidAmount))) {
+                // this method is subject to minimumStakePeriod (see Synthetix docs)
+                repaidAmount = amountToRepay;
+            }
         }
-        emit RepayDebt(repaidAmount, _debtBalance.sub(repaidAmount));
+        emit RepayDebt(repaidAmount, balanceOfDebt());
     }
 
     // two profit sources: Synthetix protocol and Yearn sUSD Vault
@@ -515,11 +536,17 @@ contract Strategy is BaseStrategy {
             _amount > balanceOfSusdInVault() ||
             balanceOfSusdInVault().sub(_amount) <= MIN_ISSUE
         ) {
-            susdVault.withdraw();
+            // NOTE: maxLoss can be set to a higher value to be able to withdraw from lossy vault
+            susdVault.withdraw(
+                susdVault.balanceOf(address(this)),
+                address(this),
+                maxLoss
+            );
         } else {
+            // NOTE: maxLoss can be set to a higher value to be able to withdraw from lossy vault
             uint256 _sharesToWithdraw =
                 _amount.mul(1e18).div(susdVault.pricePerShare());
-            susdVault.withdraw(_sharesToWithdraw);
+            susdVault.withdraw(_sharesToWithdraw, address(this), maxLoss);
         }
     }
 
@@ -557,6 +584,31 @@ contract Strategy is BaseStrategy {
     }
 
     // ********************** CALCS **********************
+    function ethToWant(uint256 _amtInWei)
+        public
+        view
+        override
+        returns (uint256)
+    {
+        if (_amtInWei == 0) {
+            return 0;
+        }
+        address[] memory path = new address[](2);
+        path[0] = address(want);
+        path[1] = address(WETH);
+
+        uint256[] memory amounts = router.getAmountsOut(_amtInWei, path);
+        return amounts[amounts.length - 1];
+    }
+
+    function liquidateAllPositions()
+        internal
+        override
+        returns (uint256 _amountFreed)
+    {
+        // NOTE: we try to unlock all of the collateral in the strategy (which should be == totalDebt)
+        (_amountFreed, ) = liquidatePosition(vault.debtOutstanding());
+    }
 
     function estimatedProfit() public view returns (uint256) {
         uint256 availableFees; // in sUSD
@@ -568,6 +620,7 @@ contract Strategy is BaseStrategy {
 
     function getTargetDebt(uint256 _targetCollateral)
         internal
+        view
         returns (uint256)
     {
         uint256 _targetRatio = getTargetRatio();

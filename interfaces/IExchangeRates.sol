@@ -16,6 +16,12 @@ interface IExchangeRates {
         bool frozenAtLowerLimit;
     }
 
+    function owner() external view returns (address);
+
+    function setOracle(address _oracle) external;
+
+    function removeAggregator(bytes32 currencyKey) external;
+
     // Views
     function aggregators(bytes32 currencyKey) external view returns (address);
 

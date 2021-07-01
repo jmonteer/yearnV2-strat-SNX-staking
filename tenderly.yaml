@@ -1,0 +1,9 @@
+account_id: 3feca2b2-be8f-4ffa-8e68-9f430847d6bd
+exports:
+  mainnet-yearn-fork:
+    forked_network: Mainnet
+    project_slug: yearn/snx-usd-minter
+    protocol: ""
+    rpc_address: 127.0.0.1:8545
+project_slug: yearn/snx-usd-minter
+provider: Brownie

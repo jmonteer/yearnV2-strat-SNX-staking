@@ -1,6 +1,7 @@
 import brownie
 from brownie import Wei, Contract
 from eth_abi import encode_single
+from utils import accumulate_fees
 
 
 def test_liquidations_snx_price_change(
@@ -15,8 +16,8 @@ def test_liquidations_snx_price_change(
     snx_whale,
     bob,
     snx_oracle,
+    debt_cache,
 ):
-    chain.snapshot()
     # Move stale period to 6 days
     resolver = Contract(strategy.resolver())
     settings = Contract(
@@ -33,13 +34,16 @@ def test_liquidations_snx_price_change(
     # Invest with an SNX price of 20
     snx_oracle.updateSnxPrice(Wei("20 ether"), {"from": gov})
     strategy.harvest({"from": gov})
+    accumulate_fees(strategy)
 
+    debtCache = Contract(resolver.getAddress(encode_single("bytes32", b"DebtCache")))
+    debtCache.takeDebtSnapshot({"from": debtCache.owner()})
     chain.sleep(86400 + 1)  # just over 24h
     chain.mine()
 
     assert strategy.balanceOfWant() == Wei("1000 ether")
     assert strategy.balanceOfSusd() == 0
-    assert strategy.balanceOfSusdInVault() == Wei("4000 ether")
+    assert strategy.balanceOfSusdInVault() > 0
 
     # price collapses
     snx_oracle.updateSnxPrice(Wei("7 ether"), {"from": gov})
@@ -60,7 +64,7 @@ def test_liquidations_snx_price_change(
     )
     previous_whale_balance = snx.balanceOf(susd_whale)
     synthetix.liquidateDelinquentAccount(strategy, amount_needed, {"from": susd_whale})
-
+    debtCache.takeDebtSnapshot({"from": debtCache.owner()})
     assert strategy.getCurrentRatio() == strategy.getIssuanceRatio()
 
     vault.withdraw(vault.balanceOf(bob), bob, 10_000, {"from": bob})
@@ -74,7 +78,6 @@ def test_liquidations_snx_price_change(
         < Wei("1000 ether") - snx.balanceOf(bob)
         < amount_needed * 11 / 70 * 1.001
     )  # the losses where correctly calculated
-    chain.revert()
 
 
 def test_liquidations_debt_changes(
@@ -89,15 +92,15 @@ def test_liquidations_debt_changes(
     snx_whale,
     bob,
     snx_oracle,
+    debt_cache,
 ):
-    chain.snapshot()
     # Move stale period to 16 days
     resolver = Contract(strategy.resolver())
     settings = Contract(
         resolver.getAddress(encode_single("bytes32", b"SystemSettings"))
     )
-    settings.setRateStalePeriod(24 * 3600 * 16, {"from": settings.owner()})
-    settings.setDebtSnapshotStaleTime(24 * 3600 * 16, {"from": settings.owner()})
+    settings.setRateStalePeriod(24 * 3600 * 30, {"from": settings.owner()})
+    settings.setDebtSnapshotStaleTime(24 * 3600 * 30, {"from": settings.owner()})
 
     snx.transfer(bob, Wei("1000 ether"), {"from": snx_whale})
     snx.approve(vault, 2 ** 256 - 1, {"from": bob})
@@ -107,15 +110,18 @@ def test_liquidations_debt_changes(
     # Invest with an SNX price of 20
     snx_oracle.updateSnxPrice(Wei("20 ether"), {"from": gov})
     strategy.harvest({"from": gov})
+    accumulate_fees(strategy)
+
+    # debt pool value increases (main assets are ETH and WBTC so increasing its price increases debt pool value)
+    debtCache = Contract(resolver.getAddress(encode_single("bytes32", b"DebtCache")))
+    debtCache.takeDebtSnapshot({"from": debtCache.owner()})
 
     chain.sleep(86400 + 1)  # just over 24h
     chain.mine()
 
     assert strategy.balanceOfWant() == Wei("1000 ether")
     assert strategy.balanceOfSusd() == 0
-    assert strategy.balanceOfSusdInVault() == Wei("4000 ether")
-    # debt pool value increases (main assets are ETH and WBTC so increasing its price increases debt pool value)
-    debtCache = Contract(resolver.getAddress(encode_single("bytes32", b"DebtCache")))
+    assert strategy.balanceOfSusdInVault() > 0
 
     # done to cache from infura
     try:
@@ -129,8 +135,8 @@ def test_liquidations_debt_changes(
     # debt pool goes up to the sky
     previous_debt = strategy.balanceOfDebt()
 
-    snx_oracle.updateBTCPrice(Wei("250000 ether"), {"from": gov})
-    snx_oracle.updateETHPrice(Wei("10000 ether"), {"from": gov})
+    snx_oracle.updateBTCPrice(Wei("300000 ether"), {"from": gov})
+    # snx_oracle.updateETHPrice(Wei("10000 ether"), {"from": gov})
     debtCache.takeDebtSnapshot({"from": debtCache.owner()})
     print("debt", strategy.balanceOfDebt())
     # check that our debt has increased when debt pool value has increased
@@ -151,7 +157,7 @@ def test_liquidations_debt_changes(
     )
     previous_whale_balance = snx.balanceOf(susd_whale)
     synthetix.liquidateDelinquentAccount(strategy, amount_needed, {"from": susd_whale})
-
+    debtCache.takeDebtSnapshot({"from": debtCache.owner()})
     assert strategy.getCurrentRatio() == strategy.getIssuanceRatio()
 
     vault.withdraw(vault.balanceOf(bob), bob, 10_000, {"from": bob})
@@ -165,5 +171,3 @@ def test_liquidations_debt_changes(
         < Wei("1000 ether") - snx.balanceOf(bob)
         < amount_needed * 11 / 200 * 1.001
     )  # the losses where correctly calculated
-
-    chain.revert()

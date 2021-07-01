@@ -1,4 +1,5 @@
 import brownie
+from utils import accumulate_fees
 
 
 def test_target_multiplier(vault, strategy, bob):

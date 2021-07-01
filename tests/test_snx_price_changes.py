@@ -1,6 +1,7 @@
 import brownie
 from brownie import Wei, Contract
 from eth_abi import encode_single
+from utils import accumulate_fees
 
 
 def test_snx_price_decreases(
@@ -15,15 +16,15 @@ def test_snx_price_decreases(
     snx_whale,
     bob,
     snx_oracle,
+    debt_cache,
 ):
-    chain.snapshot()
     # Move stale period to 6 days
     resolver = Contract(strategy.resolver())
     settings = Contract(
         resolver.getAddress(encode_single("bytes32", b"SystemSettings"))
     )
-    settings.setRateStalePeriod(24 * 3600 * 16, {"from": settings.owner()})
-    settings.setDebtSnapshotStaleTime(24 * 3600 * 16, {"from": settings.owner()})
+    settings.setRateStalePeriod(24 * 3600 * 30, {"from": settings.owner()})
+    settings.setDebtSnapshotStaleTime(24 * 3600 * 30, {"from": settings.owner()})
 
     snx.transfer(bob, Wei("1000 ether"), {"from": snx_whale})
     snx.approve(vault, 2 ** 256 - 1, {"from": bob})
@@ -32,14 +33,13 @@ def test_snx_price_decreases(
     # Invest with an SNX price of 20
     snx_oracle.updateSnxPrice(Wei("20 ether"), {"from": gov})
     strategy.harvest({"from": gov})
-
+    debt_cache.takeDebtSnapshot({"from": debt_cache.owner()})
     chain.sleep(86400 + 1)  # just over 24h
     chain.mine()
 
     assert strategy.balanceOfWant() == Wei("1000 ether")
     assert strategy.balanceOfSusd() == 0
-    assert strategy.balanceOfSusdInVault() == Wei("4000 ether")
-
+    assert strategy.balanceOfSusdInVault() > 0
     previous_want = strategy.balanceOfWant()
 
     snx_oracle.updateSnxPrice(Wei("18 ether"), {"from": gov})
@@ -56,6 +56,7 @@ def test_snx_price_decreases(
     previous_vault_balance = strategy.balanceOfSusdInVault()
 
     strategy.harvest({"from": gov})
+    debt_cache.takeDebtSnapshot({"from": debt_cache.owner()})
     chain.sleep(86400 + 1)  # just over 24h
     chain.mine()
 
@@ -72,6 +73,7 @@ def test_snx_price_decreases(
     previous_debt = strategy.balanceOfDebt()
 
     strategy.harvest({"from": gov})
+    debt_cache.takeDebtSnapshot({"from": debt_cache.owner()})
     chain.sleep(86400 + 1)  # just over 24h
     chain.mine()
     assert previous_debt > strategy.balanceOfDebt()
@@ -92,7 +94,6 @@ def test_snx_price_decreases(
 
     # bob did not lose SNX
     assert snx.balanceOf(bob) == Wei("1000 ether")
-    chain.revert()
 
 
 def test_snx_price_increases(
@@ -107,15 +108,15 @@ def test_snx_price_increases(
     snx_whale,
     bob,
     snx_oracle,
+    debt_cache,
 ):
-    chain.snapshot()
     # Move stale period to 6 days
     resolver = Contract(strategy.resolver())
     settings = Contract(
         resolver.getAddress(encode_single("bytes32", b"SystemSettings"))
     )
-    settings.setRateStalePeriod(24 * 3600 * 6, {"from": settings.owner()})
-    settings.setDebtSnapshotStaleTime(24 * 3600 * 6, {"from": settings.owner()})
+    settings.setRateStalePeriod(24 * 3600 * 30, {"from": settings.owner()})
+    settings.setDebtSnapshotStaleTime(24 * 3600 * 30, {"from": settings.owner()})
 
     snx.transfer(bob, Wei("1000 ether"), {"from": snx_whale})
     snx.approve(vault, 2 ** 256 - 1, {"from": bob})
@@ -124,13 +125,13 @@ def test_snx_price_increases(
     # Invest with an SNX price of 20
     snx_oracle.updateSnxPrice(Wei("20 ether"), {"from": gov})
     strategy.harvest({"from": gov})
-
+    debt_cache.takeDebtSnapshot({"from": debt_cache.owner()})
     chain.sleep(86400 + 1)  # just over 24h
     chain.mine()
 
     assert strategy.balanceOfWant() == Wei("1000 ether")
     assert strategy.balanceOfSusd() == 0
-    assert strategy.balanceOfSusdInVault() == Wei("4000 ether")
+    assert strategy.balanceOfSusdInVault() > 0
 
     previous_want = strategy.balanceOfWant()
 
@@ -148,6 +149,7 @@ def test_snx_price_increases(
     previous_vault_balance = strategy.balanceOfSusdInVault()
 
     strategy.harvest({"from": gov})
+    debt_cache.takeDebtSnapshot({"from": debt_cache.owner()})
     chain.sleep(86400 + 1)  # just over 24h
     chain.mine()
 
@@ -164,4 +166,3 @@ def test_snx_price_increases(
     assert snx.balanceOf(strategy) == 0
 
     assert snx.balanceOf(bob) == Wei("1000 ether")
-    chain.revert()

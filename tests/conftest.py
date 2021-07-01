@@ -1,5 +1,5 @@
 import pytest
-from brownie import config, Contract
+from brownie import config, Contract, Wei
 from eth_abi import encode_single
 
 
@@ -49,12 +49,11 @@ def token(snx):
 
 
 @pytest.fixture
-def amount(accounts, token):
+def amount(accounts, token, snx_whale):
     amount = 10_000 * 10 ** token.decimals()
     # In order to get some funds for the token you are about to use,
     # it impersonate an exchange address to use it's funds.
-    reserve = accounts.at("0xd551234ae421e3bcba99a0da6d736074f22192ff", force=True)
-    token.transfer(accounts[0], amount, {"from": reserve})
+    token.transfer(accounts[0], amount, {"from": snx_whale})
     yield amount
 
 
@@ -82,7 +81,7 @@ def snx():
 
 @pytest.fixture
 def susd_whale(accounts):
-    yield accounts.at("0x49BE88F0fcC3A8393a59d3688480d7D253C37D2A", force=True)
+    yield accounts.at("0xF977814e90dA44bFA03b6295A0616a897441aceC", force=True)
 
 
 @pytest.fixture
@@ -91,18 +90,18 @@ def snx_whale(accounts):
 
 
 @pytest.fixture
-def snx_oracle(gov, accounts, SnxOracle):
-    exchange_rate = Contract("0xd69b189020EF614796578AfE4d10378c5e7e1138")
+def snx_oracle(gov, accounts, SnxOracle, interface):
+    exchange_rate = interface.IExchangeRates(
+        "0xd69b189020EF614796578AfE4d10378c5e7e1138"
+    )
     er_gov = accounts.at(exchange_rate.owner(), force=True)
-    new_oracle = gov.deploy(SnxOracle, "0xd69b189020EF614796578AfE4d10378c5e7e1138")
+    new_oracle = gov.deploy(SnxOracle, exchange_rate)
     exchange_rate.setOracle(new_oracle, {"from": er_gov})
 
     if (
         exchange_rate.aggregators(encode_single("bytes32", b"SNX"))
-        == "0x0000000000000000000000000000000000000000"
+        != "0x0000000000000000000000000000000000000000"
     ):
-        yield new_oracle
-    else:
         # If we don't remove the aggregator prices update through oracle are not considered
         exchange_rate.removeAggregator(
             encode_single("bytes32", b"SNX"), {"from": er_gov}
@@ -113,12 +112,14 @@ def snx_oracle(gov, accounts, SnxOracle):
         exchange_rate.removeAggregator(
             encode_single("bytes32", b"sETH"), {"from": er_gov}
         )
-        yield new_oracle
+    new_oracle.updateBTCPrice(Wei("30000 ether"), {"from": gov})
+    new_oracle.updateETHPrice(Wei("2000 ether"), {"from": gov})
+    yield new_oracle
 
 
 @pytest.fixture
 def susd_vault(accounts):
-    vault = Contract("0xa5cA62D95D24A4a350983D5B8ac4EB8638887396")
+    vault = Contract("0xcE0F1Ef5aAAB82547acc699d3Ab93c069bb6e547")
     susd_gov = accounts.at(vault.governance(), force=True)
     vault.setDepositLimit(2 ** 256 - 1, {"from": susd_gov})
     yield vault
@@ -134,6 +135,24 @@ def vault(pm, gov, rewards, guardian, management, token):
     vault.setPerformanceFee(0, {"from": gov})
     vault.setManagementFee(0, {"from": gov})
     yield vault
+
+
+@pytest.fixture
+def resolver(strategy):
+    yield Contract(strategy.resolver())
+
+
+@pytest.fixture
+def debt_cache(resolver):
+    debtCache = Contract(resolver.getAddress(encode_single("bytes32", b"DebtCache")))
+    try:
+        print("Taking Debt Snapshot, this will take a while...")
+        debtCache.takeDebtSnapshot({"from": debtCache.owner()})
+    except:
+        print(
+            "Failed. This is expected due to timeout but it is useful to cache, next call will go through"
+        )
+    yield debtCache
 
 
 @pytest.fixture
